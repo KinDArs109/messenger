@@ -123,10 +123,14 @@ export function registerVoiceHandlers(
       ack?.(true);
       socket.emit("voice:peers", { channelId, peers: toPeers(channelId) });
 
+      // socket.to, а не io.to: вошедшему это событие не нужно, он
+      // только что получил полный состав через voice:peers. Иначе он
+      // узнаёт о собственном входе вторым сообщением и добавляет себя
+      // в список повторно.
       const targets = await audience(channelId);
-      emitToAudience(io, targets, (to) =>
-        to.emit("voice:joined", { channelId, peer: { userId, muted: false } }),
-      );
+      for (const target of targets) {
+        socket.to(target).emit("voice:joined", { channelId, peer: { userId, muted: false } });
+      }
     })();
   });
 
