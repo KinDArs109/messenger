@@ -21,6 +21,7 @@ const WINDOW = 1;
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
+
 /** Секрет в base32 — формата, который понимают приложения-аутентификаторы.
  *  160 бит: столько же, сколько в блоке HMAC-SHA1, брать меньше смысла нет. */
 export function generateSecret(): string {

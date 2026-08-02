@@ -16,7 +16,8 @@
     "db:reset": "prisma migrate reset",
     "db:up": "node scripts/pg.mjs up",
     "db:down": "node scripts/pg.mjs down",
-    "db:status": "node scripts/pg.mjs status"
+    "db:status": "node scripts/pg.mjs status",
+    "check:nat": "tsx --env-file=.env scripts/check-nat.ts"
   },
   "dependencies": {
     "@messenger/shared": "*",

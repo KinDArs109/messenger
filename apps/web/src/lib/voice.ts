@@ -25,8 +25,10 @@ import { getSocket } from "./socket";
  *  соединение не построится вообще, а с ними — хотя бы в простых
  *  сетях. */
 const FALLBACK: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun.sipnet.ru:3478" },
+  // Те же и в том же порядке, что отдаёт сервер: серверы Google
+  // из российских сетей молчат, и ставить их первыми — терять
+  // секунды на ожидание.
+  { urls: ["stun:stun.sipnet.ru:3478", "stun:stun.miwifi.com:3478"] },
 ];
 
 let iceServers: RTCIceServer[] | null = null;

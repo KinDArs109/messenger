@@ -23,7 +23,8 @@
     "db:up": "npm run db:up --workspace @messenger/server",
     "db:down": "npm run db:down --workspace @messenger/server",
     "db:status": "npm run db:status --workspace @messenger/server",
-    "check:db": "npm run check:db --workspace @messenger/server"
+    "check:db": "npm run check:db --workspace @messenger/server",
+    "check:nat": "npm run check:nat --workspace @messenger/server"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",
