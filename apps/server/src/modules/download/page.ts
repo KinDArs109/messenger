@@ -105,9 +105,6 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
      она бьёт по глазам и тянет внимание с главной кнопки. */
   .note a { color: var(--text); text-underline-offset: 2px; }
   .note a:hover { color: var(--bright); }
-  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
-  footer { margin-top: 28px; color: var(--faint); font-size: 13px; }
-  footer a { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -123,7 +120,7 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
   <h1>Мессенджер для своих</h1>
   <p class="lead">
     Серверы с каналами, личные переписки, файлы и разговор голосом.
-    Ничьих серверов посередине — всё живёт на одном компьютере.
+    Для своих, без лишних глаз.
   </p>
 
   <div class="actions">
@@ -136,8 +133,8 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
   </div>
 
   <ul class="features">
-    <li><b>Ваши данные — у вас</b><span>Переписка лежит на компьютере владельца, а не в чужом облаке.</span></li>
-    <li><b>Голос напрямую</b><span>Звук идёт между собеседниками, минуя сервер.</span></li>
+    <li><b>Только свои</b><span>Закрытый круг: никакой ленты, рекламы и посторонних.</span></li>
+    <li><b>Голос напрямую</b><span>Звук идёт между собеседниками, минуя посредников.</span></li>
     <li><b>Без установки тоже</b><span>Работает в браузере — приложение нужно не всем.</span></li>
   </ul>
 
@@ -151,7 +148,10 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
     }
   </p>
 
-  <footer><span class="dot"></span> Сервис работает, пока включён компьютер владельца</footer>
+  <!-- Подвала нет. Раньше там стояла строка про то, где всё это
+       работает, — но страница открыта в интернете, и устройство
+       сервиса посторонним знать незачем. Повторять же заголовок
+       ради симметрии — пустая строка на экране. -->
 </main>
 </body>
 </html>`;
