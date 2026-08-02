@@ -1,0 +1,274 @@
+// Схема базы данных мессенджера.
+// После изменений: npm run db:migrate
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+
+  // База живёт на той же машине, что и сервер.
+  //
+  // Сначала она была в облаке — так было проще начать, когда локально
+  // PostgreSQL поставить не удавалось. Оказалось, что это встроенная
+  // в архитектуру зависимость от заграничного канала: рвётся он —
+  // мессенджер мёртв для всех, а не только для владельца ноутбука.
+  // Отдельный directUrl для миграций теперь не нужен: пула нет.
+  url = env("DATABASE_URL")
+}
+
+// ─── Пользователи ────────────────────────────────────────────
+
+model User {
+  id           String   @id
+  email        String   @unique
+  passwordHash String
+  username     String   @unique // латиница, участвует в упоминаниях
+  displayName  String // отображаемое, любые символы
+  avatarUrl    String?
+  status       String   @default("offline") // online | idle | dnd | offline
+
+  // Одноразовые коды (TOTP). Секрет появляется на шаге настройки,
+  // но до подтверждения кодом считается неподключённым: иначе
+  // человек, не успевший добавить ключ в приложение, остался бы
+  // с включённым способом входа, которым не может воспользоваться.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+
+  // Подтверждение почты. Код лежит хешем, как и всё, что даёт доступ:
+  // дамп базы не должен позволять войти чужой учётной записью.
+  emailVerifiedAt   DateTime?
+  emailCodeHash     String?
+  emailCodeExpires  DateTime?
+  emailCodeSentAt   DateTime?
+  // Счётчик неудачных попыток. Шестизначный код перебирается за
+  // миллион запросов, и без ограничения это вопрос времени.
+  emailCodeAttempts Int       @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedServers       Server[]             @relation("ServerOwner")
+  memberships        ServerMember[]
+  messages           Message[]
+  refreshTokens      RefreshToken[]
+  readStates         ReadState[]
+  reactions          Reaction[]
+  channelMemberships ChannelParticipant[]
+  createdInvites     Invite[]             @relation("InviteCreator")
+  attachments        Attachment[]
+  sentRequests       Friendship[]         @relation("FriendRequester")
+  receivedRequests   Friendship[]         @relation("FriendAddressee")
+  bans               Ban[]                @relation("BannedUser")
+  bansIssued         Ban[]                @relation("BannedByUser")
+}
+
+// Дружба хранится одной строкой на пару, а не двумя зеркальными.
+// Две строки пришлось бы держать согласованными вручную, и рано или
+// поздно они разошлись бы: у одного друг есть, у другого нет.
+model Friendship {
+  id          String    @id
+  requesterId String
+  addresseeId String
+  // PENDING — заявка отправлена, ACCEPTED — дружба состоялась.
+  // Отклонённые не храним: строка просто удаляется, иначе человек
+  // не смог бы попросить второй раз.
+  status      String    @default("PENDING")
+  createdAt   DateTime  @default(now())
+  acceptedAt  DateTime?
+
+  requester User @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("FriendAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  // Пара уникальна в одну сторону. Встречную заявку ловим отдельной
+  // проверкой в коде: индекс её не поймает, порядок полей другой.
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+}
+
+model RefreshToken {
+  id        String    @id
+  userId    String
+  tokenHash String    @unique // храним хеш, не сам токен
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Серверы и каналы ────────────────────────────────────────
+
+model Server {
+  id        String   @id
+  name      String
+  iconUrl   String?
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  owner    User           @relation("ServerOwner", fields: [ownerId], references: [id])
+  channels Channel[]
+  members  ServerMember[]
+  invites  Invite[]
+  bans     Ban[]
+
+  @@index([ownerId])
+}
+
+// Бан — это запись о запрете, а не отсутствие членства.
+// Просто удалить участника мало: он вернётся по той же ссылке через
+// минуту. Поэтому строка живёт отдельно и переживает выход.
+model Ban {
+  serverId  String
+  userId    String
+  reason    String?
+  bannedById String
+  createdAt DateTime @default(now())
+
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user     User   @relation("BannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  bannedBy User   @relation("BannedByUser", fields: [bannedById], references: [id])
+
+  @@id([serverId, userId])
+  @@index([userId])
+}
+
+model ServerMember {
+  serverId String
+  userId   String
+  role     String   @default("MEMBER") // OWNER | ADMIN | MEMBER
+  nickname String?
+  joinedAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([serverId, userId])
+  @@index([userId])
+}
+
+// Каналы сервера И личные переписки живут в одной таблице.
+// serverId = null означает ЛС. Так у Message один внешний ключ вместо
+// двух, и вся логика сообщений пишется один раз.
+model Channel {
+  id        String   @id
+  serverId  String?
+  type      String // TEXT | VOICE | DM | GROUP_DM
+  name      String? // null для личных переписок
+  topic     String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  server       Server?              @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  participants ChannelParticipant[]
+  readStates   ReadState[]
+
+  @@index([serverId, position])
+}
+
+// Только для ЛС и групповых ЛС
+model ChannelParticipant {
+  channelId String
+  userId    String
+  addedAt   DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, userId])
+  @@index([userId])
+}
+
+// ─── Сообщения ───────────────────────────────────────────────
+
+model Message {
+  id        String    @id // ULID: сортируется по времени сам
+  channelId String
+  authorId  String
+  content   String
+  replyToId String?
+  editedAt  DateTime?
+  deletedAt DateTime? // мягкое удаление
+  createdAt DateTime  @default(now())
+
+  channel     Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author      User         @relation(fields: [authorId], references: [id])
+  replyTo     Message?     @relation("Reply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies     Message[]    @relation("Reply")
+  attachments Attachment[]
+  reactions   Reaction[]
+
+  // Главный индекс проекта. Без него выборка истории канала
+  // превращается в полное сканирование таблицы.
+  @@index([channelId, id(sort: Desc)])
+  @@index([authorId])
+}
+
+model Attachment {
+  id String @id
+
+  // Файл загружается до отправки сообщения — пока человек дописывает
+  // текст, он уже лежит на диске. Поэтому связь необязательная:
+  // сначала появляется вложение, потом сообщение, к которому его
+  // привязывают. Неприкреплённые подчищает npm run db:cleanup.
+  messageId String?
+
+  uploaderId String
+  filename   String // как назвал пользователь — только для показа
+  storageKey String @unique // как лежит на диске — генерируем сами
+  size       Int
+  mimeType   String
+  width      Int?
+  height     Int?
+  createdAt  DateTime @default(now())
+
+  message  Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploader User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([uploaderId])
+}
+
+model Reaction {
+  messageId String
+  userId    String
+  emoji     String
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, emoji])
+}
+
+// ─── Приглашения и непрочитанное ─────────────────────────────
+
+model Invite {
+  code      String    @id // 8 символов
+  serverId  String
+  creatorId String
+  maxUses   Int?
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  server  Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  creator User   @relation("InviteCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+model ReadState {
+  userId            String
+  channelId         String
+  lastReadMessageId String?
+  mentionCount      Int     @default(0)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+}

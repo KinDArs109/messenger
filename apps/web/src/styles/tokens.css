@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* Единственное место, где в проекте встречаются конкретные цвета
+   и размеры. В компонентах — только классы вроде bg-sidebar или
+   text-muted.
+
+   Это не педантизм. Перед публичным запуском палитру нужно будет
+   отвести подальше от оригинала, и от того, лежит она в одном файле
+   или размазана по разметке, зависит, займёт это полчаса или неделю. */
+
+@theme {
+  /* Поверхности: от самой тёмной к самой светлой.
+     Рейл темнее сайдбара, сайдбар темнее чата — взгляд собирается
+     в центре, где содержимое. */
+  --color-rail: #1e1f22;
+  --color-sidebar: #2b2d31;
+  --color-chat: #313338;
+  --color-raised: #383a40;
+  --color-hover: #2e3035;
+  --color-active: #404249;
+  --color-panel: #232428;
+  --color-line: #3f4147;
+
+  /* Текст */
+  --color-body: #dbdee1;
+  --color-bright: #f2f3f5;
+  --color-muted: #949ba4;
+  --color-faint: #80848e;
+  --color-link: #00a8fc;
+
+  /* Акцент */
+  --color-accent: #5865f2;
+  --color-accent-hover: #4752c4;
+
+  /* Статусы и семантика */
+  --color-online: #23a55a;
+  --color-idle: #f0b232;
+  --color-dnd: #f23f43;
+  --color-offline: #80848e;
+  --color-danger: #da373c;
+
+  /* Раскладка */
+  --spacing-rail: 72px;
+  --spacing-side: 240px;
+  --spacing-head: 48px;
+
+  /* Типографика */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+
+  /* Движение: короткое и незаметное. Всё, что дольше 200 мс,
+     начинает раздражать на второй день пользования. */
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-chat text-body font-sans antialiased;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  /* Кольцо фокуса не убираем, а делаем заметным: без него
+     клавиатурная навигация превращается в угадайку. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1a1b1e;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* То же самое, но по выбору человека в настройках. Системная
+     настройка выше остаётся в силе: она сильнее, потому что её
+     ставят по медицинским причинам, а не для вкуса. */
+  .prefs-still *,
+  .prefs-still *::before,
+  .prefs-still *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

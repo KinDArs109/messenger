@@ -1,0 +1,42 @@
+{
+  "name": "messenger",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n сервер,клиент -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace @messenger/server",
+    "dev:web": "npm run dev --workspace @messenger/web",
+    "build": "npm run build --workspace @messenger/web",
+    "start": "cross-env NODE_ENV=production npm run start --workspace @messenger/server",
+    "typecheck": "tsc -p packages/shared && tsc -p apps/server && tsc -p apps/web",
+    "db:migrate": "npm run db:migrate --workspace @messenger/server",
+    "db:seed": "npm run db:seed --workspace @messenger/server",
+    "db:studio": "npm run db:studio --workspace @messenger/server",
+    "db:reset": "npm run db:reset --workspace @messenger/server",
+    "check:realtime": "npm run check:realtime --workspace @messenger/server",
+    "db:cleanup": "npm run db:cleanup --workspace @messenger/server",
+    "db:password": "npm run db:password --workspace @messenger/server",
+    "db:up": "npm run db:up --workspace @messenger/server",
+    "db:down": "npm run db:down --workspace @messenger/server",
+    "db:status": "npm run db:status --workspace @messenger/server",
+    "check:db": "npm run check:db --workspace @messenger/server"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4",
+    "cross-env": "^10.1.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.1": true,
+    "prisma@6.19.3": true
+  }
+}

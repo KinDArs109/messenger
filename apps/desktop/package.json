@@ -1,0 +1,43 @@
+{
+  "name": "@messenger/desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Мессенджер",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "40.10.6",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "ru.messenger.desktop",
+    "productName": "Мессенджер",
+    "electronVersion": "40.10.6",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": ["main.cjs", "preload.cjs"],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Мессенджер",
+      "artifactName": "Мессенджер-установка.exe"
+    },
+    "portable": {
+      "artifactName": "Мессенджер-portable.exe"
+    }
+  }
+}

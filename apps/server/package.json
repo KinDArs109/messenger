@@ -1,0 +1,50 @@
+{
+  "name": "@messenger/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "start": "tsx --env-file=.env src/index.ts",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx --env-file=.env prisma/seed.ts",
+    "check:realtime": "tsx --env-file=.env scripts/check-realtime.ts",
+    "db:cleanup": "tsx --env-file=.env scripts/cleanup-dev.ts",
+    "db:password": "tsx --env-file=.env scripts/set-password.ts",
+    "check:db": "tsx --env-file=.env scripts/check-db.ts",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset",
+    "db:up": "node scripts/pg.mjs up",
+    "db:down": "node scripts/pg.mjs down",
+    "db:status": "node scripts/pg.mjs status"
+  },
+  "dependencies": {
+    "@messenger/shared": "*",
+    "@node-rs/argon2": "^2.0.2",
+    "@prisma/client": "^6.19.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "jose": "^6.1.0",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.3",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1",
+    "ulid": "^3.0.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^24.10.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/qrcode": "^1.5.6",
+    "prisma": "^6.19.0",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.20.6"
+  }
+}
