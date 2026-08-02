@@ -7,12 +7,15 @@ import {
   totpDisableSchema,
   totpEnableSchema,
   emailCodeSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 } from "@messenger/shared";
 import { generateSecret, otpauthUrl, verifyCode } from "../../lib/totp.js";
 import { verifyPassword } from "../../lib/password.js";
 import { isMailEnabled } from "../../lib/mailer.js";
 import { env } from "../../config/env.js";
 import { issueEmailCode, verifyEmailCode } from "./email.js";
+import { requestPasswordReset, resetPassword } from "./reset.js";
 import { validateBody } from "../../middleware/validate.js";
 import { authLimiter } from "../../middleware/rateLimit.js";
 import { currentUserId, requireAuth } from "../../middleware/auth.js";
@@ -54,6 +57,35 @@ authRouter.post(
     );
     setRefreshCookie(res, refreshToken);
     res.json(result);
+  },
+);
+
+/** Забыли пароль: код на почту.
+ *
+ *  Отвечаем «ок» всегда, даже если такого пользователя нет. Иначе
+ *  форма превращается в способ проверять, зарегистрирован ли адрес. */
+authRouter.post(
+  "/password/forgot",
+  authLimiter,
+  validateBody(forgotPasswordSchema),
+  async (req, res) => {
+    await requestPasswordReset((req.body as { login: string }).login);
+    res.json({ sent: true, mailEnabled: isMailEnabled() });
+  },
+);
+
+authRouter.post(
+  "/password/reset",
+  authLimiter,
+  validateBody(resetPasswordSchema),
+  async (req, res) => {
+    const { login, code, password } = req.body as {
+      login: string;
+      code: string;
+      password: string;
+    };
+    await resetPassword(login, code, password);
+    res.status(204).end();
   },
 );
 

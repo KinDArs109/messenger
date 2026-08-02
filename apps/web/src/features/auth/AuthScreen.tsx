@@ -6,6 +6,7 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
 import { PasswordInput } from "@/components/ui/PasswordInput";
+import { ForgotPassword } from "./ForgotPassword";
 
 interface AuthResponse {
   user: PrivateUser;
@@ -40,6 +41,7 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
   const [displayName, setDisplayName] = useState("");
   const [signupCode, setSignupCode] = useState(inviteCodeFromUrl);
   const [codeRequired, setCodeRequired] = useState(false);
+  const [forgot, setForgot] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -103,6 +105,11 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
       >
         {hint}
 
+        {forgot ? (
+          <div className="rounded-xl bg-sidebar p-8 shadow-2xl">
+            <ForgotPassword onBack={() => setForgot(false)} />
+          </div>
+        ) : (
         <form onSubmit={submit} className="rounded-xl bg-sidebar p-8 shadow-2xl">
           <Tabs items={TABS} value={mode} onChange={switchMode} className="mb-7" />
 
@@ -216,25 +223,30 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
           </Button>
 
           {!isRegister && (
-            <button
-              type="button"
-              onClick={() => {
-                setByCode(!byCode);
-                setError(null);
-                setFields({});
-              }}
-              className="mt-4 block w-full text-center text-[13px] text-link hover:underline"
-            >
-              {byCode ? "Войти по паролю" : "Забыли пароль? Войти по коду"}
-            </button>
+            <div className="mt-4 flex flex-col items-center gap-1.5 text-[13px]">
+              <button
+                type="button"
+                onClick={() => setForgot(true)}
+                className="text-link hover:underline"
+              >
+                Забыли пароль?
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setByCode(!byCode);
+                  setError(null);
+                  setFields({});
+                }}
+                className="text-muted hover:text-body hover:underline"
+              >
+                {byCode ? "Войти по паролю" : "Войти по коду из приложения"}
+              </button>
+            </div>
           )}
 
-          {!isRegister && (
-            <p className="mt-5 text-center text-[13px] text-faint">
-              anna / boris / vera @example.com · пароль password123
-            </p>
-          )}
         </form>
+        )}
       </motion.div>
     </div>
   );

@@ -45,6 +45,15 @@ model User {
   // Счётчик неудачных попыток. Шестизначный код перебирается за
   // миллион запросов, и без ограничения это вопрос времени.
   emailCodeAttempts Int       @default(0)
+
+  // Сброс пароля. Поля отдельные от подтверждения почты намеренно:
+  // это разные процессы, и человек вполне может подтверждать адрес
+  // и восстанавливать пароль одновременно — общие поля затирали бы
+  // друг друга.
+  resetCodeHash     String?
+  resetCodeExpires  DateTime?
+  resetCodeSentAt   DateTime?
+  resetCodeAttempts Int       @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

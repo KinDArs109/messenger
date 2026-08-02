@@ -42,6 +42,56 @@ function getTransport(): Transporter | null {
   return transport;
 }
 
+/** Общая обёртка: собрать письмо и не уронить вызывающего.
+ *
+ *  Ошибку не пробрасываем наверх ни в одном сценарии — недоступный
+ *  почтовый сервер не должен ронять ни регистрацию, ни восстановление
+ *  пароля. Правильная реакция — кнопка «отправить ещё раз». */
+async function send(to: string, subject: string, text: string, html: string): Promise<boolean> {
+  const mail = getTransport();
+  if (!mail) {
+    console.warn(`Почта не настроена — письмо для ${to} не отправлено`);
+    return false;
+  }
+  try {
+    await mail.sendMail({ from: fromHeader(), to, subject, text, html });
+    return true;
+  } catch (error) {
+    console.error("Не удалось отправить письмо:", error);
+    return false;
+  }
+}
+
+/** Письмо с кодом восстановления пароля.
+ *
+ *  Отдельный текст, а не общий с подтверждением почты: человек должен
+ *  понять из письма, что происходит. Одинаковое «ваш код» на два
+ *  разных случая — прямая дорога к тому, что код от восстановления
+ *  введут не туда, а настоящее письмо о взломе примут за рутину. */
+export async function sendResetCode(to: string, code: string): Promise<boolean> {
+  return send(
+    to,
+    `Восстановление пароля: ${code}`,
+    [
+      `Код для смены пароля: ${code}`,
+      "",
+      "Он действует 15 минут.",
+      "Если вы не просили сменить пароль — просто удалите это письмо,",
+      "ваш пароль останется прежним.",
+    ].join("\n"),
+    `
+      <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:420px">
+        <p style="color:#4b5563">Код для смены пароля:</p>
+        <p style="font-size:32px;letter-spacing:6px;font-weight:700;margin:12px 0">${code}</p>
+        <p style="color:#6b7280;font-size:14px">Он действует 15 минут.</p>
+        <p style="color:#9ca3af;font-size:13px">
+          Если вы не просили сменить пароль — просто удалите это письмо,
+          ваш пароль останется прежним.
+        </p>
+      </div>`,
+  );
+}
+
 /** Письмо с кодом подтверждения.
  *
  *  Ошибку не пробрасываем наверх: недоступный почтовый сервер не

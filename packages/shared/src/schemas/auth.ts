@@ -40,6 +40,21 @@ export const registerSchema = z.object({
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+/** Запрос кода на смену пароля. */
+export const forgotPasswordSchema = z.object({
+  login: z.string().trim().min(1, "Введите почту или имя пользователя").max(255).toLowerCase(),
+});
+
+/** Смена пароля по коду из письма. */
+export const resetPasswordSchema = z.object({
+  login: z.string().trim().min(1).max(255).toLowerCase(),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Код состоит из шести цифр"),
+  password: passwordSchema,
+});
+
 /** Открыта ли регистрация — клиент спрашивает до показа формы,
  *  чтобы не рисовать лишнее поле там, где оно не нужно. */
 export interface SignupPolicyDto {
