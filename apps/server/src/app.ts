@@ -20,6 +20,7 @@ import { dmsRouter } from "./modules/dms/router.js";
 import { readsRouter } from "./modules/reads/router.js";
 import { uploadsRouter } from "./modules/uploads/router.js";
 import { uploadsServeRouter } from "./modules/uploads/serve.js";
+import { downloadRouter } from "./modules/download/router.js";
 
 /** Собранный клиент. В разработке его нет — там работает Vite,
  *  который сам проксирует /api и /uploads на этот сервер. */
@@ -88,6 +89,7 @@ export function createApp() {
 
   // Вне /api: сюда ходит браузер напрямую из <img src>, без токена.
   app.use("/uploads", uploadsServeRouter);
+  app.use("/download", downloadRouter);
 
   if (existsSync(CLIENT_DIST)) {
     // Файлы сборки содержат хеш в имени, поэтому кэшируются навсегда.
@@ -109,7 +111,9 @@ export function createApp() {
     // только в браузере, сервер про них не знает. Любой переход,
     // кроме API и файлов, отдаёт оболочку — иначе обновление страницы
     // на приглашении давало бы 404.
-    app.get(/^(?!\/(api|uploads|socket\.io)\/).*/, (_req, res) => {
+    // /download тоже исключаем: без этого «всё остальное» перехватывало
+    // бы ссылку на установщик и отдавало вместо файла оболочку клиента.
+    app.get(/^(?!\/(api|uploads|socket\.io|download)(\/|$)).*/, (_req, res) => {
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(CLIENT_DIST, "index.html"));
     });
