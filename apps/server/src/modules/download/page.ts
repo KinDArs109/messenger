@@ -117,7 +117,7 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
     <circle cx="31" cy="21" r="2.2" fill="currentColor"/>
   </svg>
 
-  <h1>Мессенджер для своих</h1>
+  <h1>Мессенджер для СВОих</h1>
   <p class="lead">
     Серверы с каналами, личные переписки, файлы и разговор голосом.
     Для своих, без лишних глаз.
