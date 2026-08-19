@@ -24,7 +24,21 @@
     "db:down": "npm run db:down --workspace @messenger/server",
     "db:status": "npm run db:status --workspace @messenger/server",
     "check:db": "npm run check:db --workspace @messenger/server",
-    "check:nat": "npm run check:nat --workspace @messenger/server"
+    "check:nat": "npm run check:nat --workspace @messenger/server",
+    "check:screen": "npm run check:screen --workspace @messenger/server",
+    "check:images": "npm run check:images --workspace @messenger/server",
+    "check:upload": "npm run check:upload --workspace @messenger/server",
+    "stress": "npm run stress --workspace @messenger/server",
+    "check:video": "npm run check:video --workspace @messenger/server",
+    "check:roster": "npm run check:roster --workspace @messenger/server",
+    "check:echo": "npm run check:echo -w @messenger/web",
+    "check:pictures": "npm run check:pictures -w @messenger/server",
+    "check:turn": "npm run check:turn -w @messenger/server",
+    "check:deafen": "npm run check:deafen -w @messenger/web",
+    "bench": "npm run bench --workspace @messenger/server",
+    "check:speaking": "npm run check:speaking -w @messenger/web",
+    "check:contrast": "npm run check:contrast -w @messenger/web",
+    "check:amplify": "npm run check:amplify -w @messenger/web"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",

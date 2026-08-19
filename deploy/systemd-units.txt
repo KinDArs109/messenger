@@ -1,0 +1,36 @@
+=== messenger-backup.service ===
+[Unit]
+Description=Копия мессенджера: база и загруженные файлы
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/messenger/backup.sh
+=== messenger-backup.timer ===
+[Unit]
+Description=Ночная копия мессенджера
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+=== messenger-monitor.service ===
+[Unit]
+Description=Сторож мессенджера
+
+[Service]
+Type=oneshot
+ExecStart=/opt/messenger/monitor.sh
+=== messenger-monitor.timer ===
+[Unit]
+Description=Проверять мессенджер раз в минуту
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
