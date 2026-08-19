@@ -28,6 +28,14 @@ model User {
   displayName  String // отображаемое, любые символы
   avatarUrl    String?
   status       String   @default("offline") // online | idle | dnd | offline
+  /** Что человек выбрал сам: online | idle | dnd | invisible.
+   *
+   *  Отдельно от status выше: там — что видят друзья, здесь — чего
+   *  хочет он. Разница видна на «невидимом»: для друзей он «не в сети»,
+   *  для себя — невидимый. И хранится это в базе, а не в памяти
+   *  сервера: выбор должен пережить перезапуск, иначе человек,
+   *  спрятавшийся невидимкой, однажды окажется на виду. */
+  chosenStatus String   @default("online")
 
   // Одноразовые коды (TOTP). Секрет появляется на шаге настройки,
   // но до подтверждения кодом считается неподключённым: иначе
@@ -70,6 +78,44 @@ model User {
   receivedRequests   Friendship[]         @relation("FriendAddressee")
   bans               Ban[]                @relation("BannedUser")
   bansIssued         Ban[]                @relation("BannedByUser")
+  pushDevices        PushDevice[]
+  boosts             ServerBoost[]
+}
+
+/**
+ * Телефон (или браузер), которому можно постучаться, когда мессенджер
+ * закрыт.
+ *
+ * Подписку выдаёт не наш сервер, а служба доставки самого браузера:
+ * мы получаем от неё адрес и два ключа, которыми шифруется письмо.
+ * Прочитать его может только тот браузер, который подписался, —
+ * служба доставки видит лишь запечатанный конверт.
+ *
+ * Строк на человека несколько: телефон, ноутбук, второй браузер.
+ * Каждая живёт своей жизнью и умирает сама, когда браузер отвечает
+ * «такой подписки больше нет».
+ */
+model PushDevice {
+  id       String @id
+  userId   String
+  /// Адрес, по которому служба доставки принимает письма для этого
+  /// браузера. Уникален: он и есть удостоверение подписки.
+  endpoint String @unique
+  /// Открытый ключ браузера и общая соль — ими шифруется содержимое.
+  p256dh   String
+  auth     String
+  /// Чем подписались. Нужно только человеку в настройках: понять,
+  /// какое из устройств в списке — это то, что в руках.
+  label    String?
+
+  createdAt DateTime @default(now())
+  /// Когда письмо последний раз дошло. По нему видно мёртвые подписки,
+  /// о которых служба доставки почему-то не сказала.
+  usedAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // Дружба хранится одной строкой на пару, а не двумя зеркальными.
@@ -102,6 +148,14 @@ model RefreshToken {
   expiresAt DateTime
   revokedAt DateTime?
   userAgent String?
+  /** Чем зашли: приложение или браузер.
+   *
+   *  Из user-agent это выводится не всегда. Приложение на компьютере
+   *  ещё можно узнать по слову Electron, а вот приложение на телефоне
+   *  от вкладки браузера ничем не отличается: Android показывает
+   *  установленному приложению ровно тот же user-agent. Поэтому клиент
+   *  говорит о себе сам — заголовком, который ставит при входе. */
+  client    String?
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -115,6 +169,10 @@ model Server {
   id        String   @id
   name      String
   iconUrl   String?
+  /** Баннер над списком каналов. Открывается со второго уровня буста;
+   *  загруженный когда-то остаётся лежать, но наружу не отдаётся,
+   *  пока уровень не вернётся. */
+  bannerUrl String?
   ownerId   String
   createdAt DateTime @default(now())
 
@@ -123,8 +181,29 @@ model Server {
   members  ServerMember[]
   invites  Invite[]
   bans     Ban[]
+  boosts   ServerBoost[]
 
   @@index([ownerId])
+}
+
+/**
+ * Поддержка сервера участником — один буст на человека.
+ *
+ * Денег здесь нет и не будет: это не покупка, а голос за то, чтобы
+ * сервер подрос. Уникальность по паре (сервер, человек) и есть всё
+ * правило: нажал — поддержал, нажал ещё раз — снял.
+ */
+model ServerBoost {
+  id        String   @id
+  serverId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, userId])
+  @@index([serverId])
 }
 
 // Бан — это запись о запрете, а не отсутствие членства.
