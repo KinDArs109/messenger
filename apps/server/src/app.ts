@@ -12,15 +12,16 @@ import { usersRouter } from "./modules/users/router.js";
 import { friendsRouter } from "./modules/friends/router.js";
 import { voiceRouter } from "./modules/voice/router.js";
 import { bansRouter, moderationRouter } from "./modules/servers/moderation.js";
-import { requireAuth } from "./middleware/auth.js";
+import { identifyUser, requireAuth } from "./middleware/auth.js";
 import { serversRouter } from "./modules/servers/router.js";
 import { channelsRouter, messagesRouter } from "./modules/messages/router.js";
 import { invitesRouter, serverInvitesRouter } from "./modules/invites/router.js";
 import { dmsRouter } from "./modules/dms/router.js";
 import { readsRouter } from "./modules/reads/router.js";
 import { uploadsRouter } from "./modules/uploads/router.js";
+import { pushRouter } from "./modules/push/router.js";
 import { uploadsServeRouter } from "./modules/uploads/serve.js";
-import { downloadRouter } from "./modules/download/router.js";
+import { downloadRouter, landingHtml, updatesRouter } from "./modules/download/router.js";
 
 /** Собранный клиент. В разработке его нет — там работает Vite,
  *  который сам проксирует /api и /uploads на этот сервер. */
@@ -39,7 +40,17 @@ export function createApp() {
         directives: {
           defaultSrc: ["'self'"],
           // Vite собирает скрипты отдельными файлами, встроенных нет.
-          scriptSrc: ["'self'"],
+          //
+          // blob: нужен для обработчика звука, который гасит наш
+          // собственный голос в демонстрации экрана. Он собран вместе
+          // с приложением и подключается через Blob, а не отдельным
+          // файлом, намеренно: отдельный файл живёт своей жизнью в
+          // кэше и рано или поздно разъезжается с версией приложения,
+          // а мы это уже проходили — именно так и получается серый
+          // экран. Послабление умеренное: встроенные скрипты
+          // по-прежнему запрещены, а создать blob может только тот,
+          // кто уже выполняет свой код на странице.
+          scriptSrc: ["'self'", "blob:"],
           // А вот встроенные стили есть: цвет аватара и высота поля
           // ввода задаются атрибутом style прямо в разметке.
           styleSrc: ["'self'", "'unsafe-inline'"],
@@ -71,7 +82,9 @@ export function createApp() {
     res.json({ ok: true, uptime: process.uptime() });
   });
 
-  app.use("/api", apiLimiter);
+  // Сначала опознаём, потом считаем: иначе общий потолок считается
+  // по адресу, и двое друзей из одной квартиры делят его пополам.
+  app.use("/api", identifyUser, apiLimiter);
   app.use("/api/auth", authRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/friends", friendsRouter);
@@ -86,10 +99,13 @@ export function createApp() {
   app.use("/api/messages", messagesRouter);
   app.use("/api/reads", readsRouter);
   app.use("/api/uploads", uploadsRouter);
+  app.use("/api/push", pushRouter);
 
   // Вне /api: сюда ходит браузер напрямую из <img src>, без токена.
   app.use("/uploads", uploadsServeRouter);
   app.use("/download", downloadRouter);
+  // Файлы автообновления: приложение ходит сюда само, без токена.
+  app.use("/updates", updatesRouter);
 
   if (existsSync(CLIENT_DIST)) {
     // Файлы сборки содержат хеш в имени, поэтому кэшируются навсегда.
@@ -107,13 +123,82 @@ export function createApp() {
       }),
     );
 
+    /**
+     * Связь сайта с приложением для Android.
+     *
+     * Приложение под Android — это тот же сайт в своём окне. Убрать
+     * из этого окна адресную строку Chrome соглашается только тогда,
+     * когда сайт подтвердит, что приложение с такой подписью — своё.
+     * Подтверждение и лежит здесь: отпечаток ключа, которым подписан
+     * наш apk. Без него приложение откроется, но с полосой адреса
+     * наверху и будет выглядеть вкладкой браузера.
+     *
+     * Отдельным путём, а не файлом среди прочих: express.static
+     * намеренно прячет всё, что начинается с точки, а путь тут именно
+     * такой — так его определил Google.
+     */
+    app.get("/.well-known/assetlinks.json", (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
+      // dotfiles: express и здесь по умолчанию прячет пути с точкой,
+      // а этот путь такой целиком — без разрешения он отвечает 404
+      // на файл, который лежит на месте.
+      const options = { dotfiles: "allow" as const };
+      res.sendFile(path.join(CLIENT_DIST, ".well-known", "assetlinks.json"), options, (error) => {
+        if (error && !res.headersSent) res.status(404).json({ error: "Файл не выложен" });
+      });
+    });
+
+    /**
+     * Корень: незнакомому — страница выбора, своим — сразу мессенджер.
+     *
+     * Человеку, который открыл адрес впервые, показывать форму входа
+     * бессмысленно: он ещё не знает, что это и нужно ли ему ставить
+     * приложение. Но заставлять кликать «войти» каждый раз всех
+     * остальных — хуже вдвойне, поэтому спрашиваем ровно один раз.
+     *
+     * Три признака «не спрашивать», и любой из них достаточен:
+     *   ?app=1  — человек только что нажал «Открыть в браузере»,
+     *             и с этой же метки открывается установленный
+     *             веб-клиент (start_url в манифесте);
+     *   cookie  — он уже заходил и выбор сделал;
+     *   Electron — это наше приложение для Windows, оно грузит корень
+     *             и страницу выбора внутри себя показывать не должно.
+     *
+     * Ошибка в любую сторону не фатальна: своему покажется лишняя
+     * страница с кнопкой «Открыть», новичок увидит форму входа.
+     */
+    app.get("/", (req, res, next) => {
+      // Ответ на один и тот же адрес теперь разный, и промежуточные
+      // кэши обязаны об этом знать. Без Vary туннель мог бы отдать
+      // страницу выбора тому, кто её уже прошёл, — или наоборот.
+      res.setHeader("Vary", "Cookie, User-Agent");
+
+      const chosen = req.query.app !== undefined || req.cookies?.entered === "1";
+      const shell = /Electron\//.test(req.get("user-agent") ?? "");
+      if (chosen || shell) {
+        next();
+        return;
+      }
+
+      // Заголовок для service worker: он кэширует ответ на «/» как
+      // оболочку приложения и без метки сохранил бы вместо неё эту
+      // страницу — а потом показывал бы её вместо переписки, стоит
+      // пропасть сети.
+      res.setHeader("X-Landing", "1");
+      res.setHeader("Cache-Control", "no-store");
+      // Устройство передаём, чтобы страница предлагала своё: телефону
+      // приложение для телефона, компьютеру — для компьютера. Vary
+      // по User-Agent выше уже стоит.
+      res.type("html").send(landingHtml(req.get("user-agent") ?? ""));
+    });
+
     // Одностраничное приложение: адреса вроде /invite/abc123 живут
     // только в браузере, сервер про них не знает. Любой переход,
     // кроме API и файлов, отдаёт оболочку — иначе обновление страницы
     // на приглашении давало бы 404.
     // /download тоже исключаем: без этого «всё остальное» перехватывало
     // бы ссылку на установщик и отдавало вместо файла оболочку клиента.
-    app.get(/^(?!\/(api|uploads|socket\.io|download)(\/|$)).*/, (_req, res) => {
+    app.get(/^(?!\/(api|uploads|socket\.io|download|updates)(\/|$)).*/, (_req, res) => {
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(CLIENT_DIST, "index.html"));
     });

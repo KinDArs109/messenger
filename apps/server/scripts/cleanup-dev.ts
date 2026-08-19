@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { PrismaClient } from "@prisma/client";
 import { UPLOADS_DIR, deleteFile } from "../src/lib/storage.js";
+import { pictureKeysInUse } from "../src/lib/pictures.js";
 
 /** Уборка за ручными проверками.
  *
@@ -49,12 +50,19 @@ async function main() {
     };
   }
 
+  // Аватары и значки серверов лежат в том же хранилище, но ни к
+  // какому сообщению не привязаны — по общему правилу они выглядят
+  // мусором. Без этого списка первая же уборка снесла бы их все.
+  const pictures = await pictureKeysInUse();
+
   // Вложение создаётся при загрузке, а привязывается при отправке.
   // Если человек передумал и не отправил, файл остаётся висеть.
-  const orphans = await prisma.attachment.findMany({
-    where: { messageId: null },
-    select: { id: true, storageKey: true },
-  });
+  const orphans = (
+    await prisma.attachment.findMany({
+      where: { messageId: null },
+      select: { id: true, storageKey: true },
+    })
+  ).filter((orphan) => !pictures.has(orphan.storageKey));
   for (const orphan of orphans) await deleteFile(orphan.storageKey);
   await prisma.attachment.deleteMany({ where: { id: { in: orphans.map((o) => o.id) } } });
 

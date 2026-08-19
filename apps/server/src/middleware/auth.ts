@@ -15,6 +15,28 @@ declare global {
  *  Обращение к базе на каждый запрос ради полей, которые нужны
  *  далеко не всегда, — лишняя работа. Кому нужен полный объект,
  *  тот его и запросит. */
+/** Опознать, но не требовать.
+ *
+ *  Нужен ровно для ограничителя запросов: тот считает по человеку,
+ *  а если человека ещё не опознали — по адресу. Ограничитель стоит
+ *  раньше requireAuth (он общий на весь /api, а requireAuth — свой
+ *  у каждого раздела), и до этой правки в момент подсчёта никто
+ *  опознан не был. Получалось, что общий потолок делится между всеми,
+ *  кто вышел в интернет с одного адреса: двое друзей из одной квартиры
+ *  съедали лимит вдвоём, а нагрузочная проверка упиралась в него
+ *  вместо машины.
+ *
+ *  Ничего не отвергает: без токена или с плохим токеном просто идём
+ *  дальше, а разбираться будет requireAuth. */
+export const identifyUser: RequestHandler = async (req, _res, next) => {
+  const header = req.headers.authorization;
+  if (header?.startsWith("Bearer ")) {
+    const userId = await verifyAccessToken(header.slice(7));
+    if (userId) req.userId = userId;
+  }
+  next();
+};
+
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {

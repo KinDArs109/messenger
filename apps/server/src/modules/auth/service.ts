@@ -23,7 +23,7 @@ import { timingSafeEqual } from "node:crypto";
 const DUMMY_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZQ$0000000000000000000000000000000000000000000";
 
-async function issueSession(userId: string, userAgent?: string) {
+async function issueSession(userId: string, userAgent?: string, client?: string) {
   const { token, tokenHash } = createRefreshToken();
 
   await prisma.refreshToken.create({
@@ -33,6 +33,9 @@ async function issueSession(userId: string, userAgent?: string) {
       tokenHash,
       expiresAt: refreshTokenExpiry(),
       userAgent: userAgent?.slice(0, 255),
+      // Обрезаем коротко: это чужая строка из заголовка, и ничего,
+      // кроме пары известных слов, в ней быть не должно.
+      client: client?.slice(0, 32),
     },
   });
 
@@ -78,7 +81,7 @@ async function checkSignupCode(given: string | undefined): Promise<void> {
   if (!valid) throw forbidden("Код не подошёл");
 }
 
-export async function register(input: RegisterInput, userAgent?: string) {
+export async function register(input: RegisterInput, userAgent?: string, client?: string) {
   await checkSignupCode(input.signupCode);
 
   const existing = await prisma.user.findFirst({
@@ -113,7 +116,7 @@ export async function register(input: RegisterInput, userAgent?: string) {
       console.error("Не удалось отправить код подтверждения:", error),
     );
 
-    return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent)) };
+    return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
   } catch (error) {
     // Между проверкой выше и вставкой мог вклиниться другой запрос.
     // Уникальный индекс — последний рубеж, и он не подводит.
@@ -139,7 +142,7 @@ function findByLogin(login: string) {
     : prisma.user.findUnique({ where: { username: login } });
 }
 
-export async function login(input: LoginInput, userAgent?: string) {
+export async function login(input: LoginInput, userAgent?: string, client?: string) {
   const user = await findByLogin(input.login);
 
   const ok = await verifyPassword(user?.passwordHash ?? DUMMY_HASH, input.password);
@@ -150,7 +153,7 @@ export async function login(input: LoginInput, userAgent?: string) {
     throw unauthorized("Неверный логин или пароль");
   }
 
-  return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent)) };
+  return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
 }
 
 /** Вход по одноразовому коду вместо пароля.
@@ -162,6 +165,7 @@ export async function login(input: LoginInput, userAgent?: string) {
 export async function loginWithCode(
   input: { login: string; code: string },
   userAgent?: string,
+  client?: string,
 ) {
   const user = await findByLogin(input.login);
 
@@ -169,12 +173,12 @@ export async function loginWithCode(
     throw unauthorized("Неверный логин или код");
   }
 
-  return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent)) };
+  return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
 }
 
 /** Ротация: старый токен отзывается, выдаётся новый.
  *  Если refresh утёк, окно его полезности — до ближайшего обновления. */
-export async function refresh(token: string, userAgent?: string) {
+export async function refresh(token: string, userAgent?: string, client?: string) {
   const stored = await prisma.refreshToken.findUnique({
     where: { tokenHash: hashRefreshToken(token) },
     include: { user: true },
@@ -191,7 +195,7 @@ export async function refresh(token: string, userAgent?: string) {
 
   return {
     user: toPrivateUser(stored.user),
-    ...(await issueSession(stored.userId, userAgent)),
+    ...(await issueSession(stored.userId, userAgent, client)),
   };
 }
 

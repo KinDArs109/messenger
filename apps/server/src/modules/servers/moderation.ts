@@ -70,7 +70,7 @@ async function removeFromServer(serverId: string, userId: string): Promise<void>
   });
 
   // Если человек сидел в голосовом канале этого сервера — выводим.
-  leaveVoice(io, userId);
+  void leaveVoice(io, userId);
 
   io.to(room.server(serverId)).emit("member:leave", { serverId, userId });
   // Отдельно самому изгнанному: он в комнате сервера уже не состоит

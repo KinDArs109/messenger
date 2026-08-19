@@ -5,7 +5,8 @@ import { currentUserId, requireAuth } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
 import { newInviteCode } from "../../lib/ids.js";
 import { param } from "../../lib/params.js";
-import { toPublicUser } from "../../lib/dto.js";
+import { toPublicUser, toServerDto } from "../../lib/dto.js";
+import type { MemberRole } from "@messenger/shared";
 import { requireMembership, requirePermission } from "../../lib/access.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { verifyAccessToken } from "../../lib/tokens.js";
@@ -109,10 +110,19 @@ invitesRouter.post("/:code/join", requireAuth, async (req, res) => {
 
   const server = await prisma.server.findUniqueOrThrow({
     where: { id: invite.serverId },
-    include: { channels: { orderBy: { position: "asc" } } },
+    include: {
+      channels: { orderBy: { position: "asc" } },
+      boosts: { select: { userId: true } },
+    },
+  });
+  const membership = await prisma.serverMember.findUniqueOrThrow({
+    where: { serverId_userId: { serverId: invite.serverId, userId } },
+    select: { role: true },
   });
 
-  res.json({ server });
+  res.json({
+    server: toServerDto(server, membership.role as MemberRole, server.boosts.map((b) => b.userId)),
+  });
 });
 
 export const serverInvitesRouter: Router = Router({ mergeParams: true });

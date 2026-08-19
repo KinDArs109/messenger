@@ -12,32 +12,110 @@
 
 const size = (bytes: number): string => `${Math.round(bytes / 1024 / 1024)} МБ`;
 
-export function downloadPage(setupBytes: number | null, portableBytes: number | null): string {
-  const ready = setupBytes !== null || portableBytes !== null;
+/**
+ * Ссылка «войти в приложение».
+ *
+ * С меткой, а не просто «/»: теперь на корне у новичка стоит эта же
+ * страница, и без метки кнопка «Открыть в браузере» возвращала бы
+ * человека на неё саму — по кругу. Метка говорит серверу отдать
+ * приложение, а приложение по ней же запоминает выбор, чтобы больше
+ * не спрашивать.
+ */
+export const ENTER = "/?app=1";
+
+/**
+ * Строка под кнопками.
+ *
+ * У каждой системы она своя. Общая была бы либо водой, либо
+ * предупреждением про Windows человеку с телефоном в руках.
+ */
+function note(
+  device: "windows" | "android" | "ios" | "other",
+  { setup, portable, android }: Builds,
+): string {
+  if (device === "ios") {
+    return `<b>На айфоне отдельного приложения нет.</b> Откройте в браузере и нажмите
+      «Поделиться» → «На экран „Домой“»: мессенджер откроется своим окном, без адресной
+      строки, и будет вести себя как обычное приложение.`;
+  }
+
+  if (device === "android") {
+    return android === null
+      ? `<b>Приложение для Android ещё не собрано.</b> Пока откройте мессенджер в браузере —
+         он работает так же.`
+      : `<b>Android переспросит, ставить ли файл не из магазина.</b> Разрешите установку
+         из браузера — приложение подписано нашим ключом.
+         ${setup !== null ? `Для компьютера есть <a href="/download/setup">версия под Windows</a>.` : ""}`;
+  }
+
+  if (setup === null && portable === null) {
+    return android === null
+      ? `<b>Установщик ещё не собран.</b> Пока откройте мессенджер в браузере — он работает так же.`
+      : `<b>Установщик для Windows ещё не собран.</b> Для телефона есть
+         <a href="/download/android">приложение под Android</a>, а в браузере мессенджер
+         работает и без установки.`;
+  }
+
+  return `<b>Windows предупредит, что издатель неизвестен.</b> Нажмите «Подробнее» → «Выполнить
+     в любом случае»: файл не подписан, сертификат разработчика стоит десятки тысяч рублей
+     в год.
+     ${portable !== null ? `Есть и <a href="/download/portable">версия без установки</a> (${size(portable)}), но запускается она дольше.` : ""}
+     ${android !== null ? `Для телефона — <a href="/download/android">приложение под Android</a>.` : ""}`;
+}
+
+export type Builds = {
+  setup: number | null;
+  portable: number | null;
+  android: number | null;
+};
+
+export function downloadPage(
+  builds: Builds,
+  /** С чего пришли. Телефону нечего делать с установщиком для Windows,
+   *  а компьютеру — с apk; главной кнопкой ставим ту, которая человеку
+   *  подходит, остальные не прячем. */
+  device: "windows" | "android" | "ios" | "other" = "other",
+  /** На корне это лицо сервиса, а не страница скачивания: там
+   *  предлагают и приложение, и работу в браузере, и «— скачать»
+   *  в заголовке вкладки обещало бы только половину. */
+  title = "Мессенджер — скачать",
+): string {
+  const { setup: setupBytes, portable: portableBytes, android: androidBytes } = builds;
+
+  // Что предложить главной кнопкой. На айфоне приложения нет вовсе —
+  // там главной становится «Открыть в браузере», и это честно: iOS
+  // умеет ставить сайт на домашний экран сама.
+  const install =
+    device === "android" && androidBytes !== null
+      ? `<a class="btn primary" href="/download/android">Установить на Android <span class="size">${size(androidBytes)}</span></a>`
+      : device !== "android" && device !== "ios" && setupBytes !== null
+        ? `<a class="btn primary" href="/download/setup">Скачать для Windows <span class="size">${size(setupBytes)}</span></a>`
+        : "";
+
 
   return `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Мессенджер — скачать</title>
+<title>${title}</title>
 <meta name="description" content="Мессенджер для своих: серверы, каналы, личные сообщения и голос.">
 <link rel="icon" href="/icon-192.png">
 <style>
   /* Цвета те же, что в самом приложении: страница должна выглядеть
      его частью, а не отдельным сайтом про него. */
   :root {
-    --bg: #1e1f22;
-    --panel: #2b2d31;
-    --raised: #383a40;
-    --line: #3f4147;
-    --text: #dbdee1;
-    --bright: #f2f3f5;
-    --muted: #949ba4;
-    --faint: #80848e;
-    --accent: #5865f2;
-    --accent-hover: #4752c4;
-    --online: #23a55a;
+    --bg: #0b0c0e;
+    --panel: #101114;
+    --raised: #24262b;
+    --line: #2a2d33;
+    --text: #d3d6db;
+    --bright: #e6e7ea;
+    --muted: #9aa0a8;
+    --faint: #7c828b;
+    --accent: #3576c0;
+    --accent-hover: #2c63a4;
+    --online: #4bb54b;
   }
   * { box-sizing: border-box; }
   body {
@@ -51,7 +129,7 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
     font: 16px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
     /* Мягкое пятно за героем — единственное украшение на странице.
        Оно же не даёт большому тёмному полю выглядеть пустым. */
-    background-image: radial-gradient(60% 50% at 50% 0%, #5865f21f, transparent 70%);
+    background-image: radial-gradient(60% 50% at 50% 0%, #3576c024, transparent 70%);
   }
   main { width: 100%; max-width: 560px; text-align: center; }
   .mark {
@@ -124,12 +202,8 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
   </p>
 
   <div class="actions">
-    ${
-      setupBytes !== null
-        ? `<a class="btn primary" href="/download/setup">Скачать для Windows <span class="size">${size(setupBytes)}</span></a>`
-        : ""
-    }
-    <a class="btn secondary" href="/">Открыть в браузере</a>
+    ${install}
+    <a class="btn ${install ? "secondary" : "primary"}" href="${ENTER}">Открыть в браузере</a>
   </div>
 
   <ul class="features">
@@ -139,13 +213,7 @@ export function downloadPage(setupBytes: number | null, portableBytes: number | 
   </ul>
 
   <p class="note">
-    ${
-      ready
-        ? `<b>Windows предупредит, что издатель неизвестен.</b> Нажмите «Подробнее» → «Выполнить
-           в любом случае»: файл не подписан, сертификат разработчика стоит десятки тысяч рублей
-           в год. ${portableBytes !== null ? `Есть и <a href="/download/portable">версия без установки</a> (${size(portableBytes)}), но запускается она дольше.` : ""}`
-        : `<b>Установщик ещё не собран.</b> Пока откройте мессенджер в браузере — он работает так же.`
-    }
+    ${note(device, builds)}
   </p>
 
   <!-- Подвала нет. Раньше там стояла строка про то, где всё это

@@ -32,6 +32,25 @@ import {
 
 export const authRouter: Router = Router();
 
+/**
+ * Чем зашли — приложением или браузером.
+ *
+ * Клиент говорит об этом сам, заголовком. Из user-agent это выводится
+ * не всегда: приложение на Android показывает ровно тот же user-agent,
+ * что и вкладка Chrome, и отличить их снаружи нельзя никак.
+ *
+ * Строка чужая, поэтому берём не то, что прислали, а только то, что
+ * узнали: три известных слова, всё остальное — «не сказано». Иначе
+ * в списке входов оказался бы текст, написанный кем угодно.
+ */
+const CLIENTS = new Set(["app-desktop", "app-mobile", "browser"]);
+
+function clientOf(req: { headers: Record<string, unknown> }): string | undefined {
+  const raw = req.headers["x-client"];
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return CLIENTS.has(value) ? value : undefined;
+}
+
 authRouter.post(
   "/register",
   authLimiter,
@@ -40,6 +59,7 @@ authRouter.post(
     const { refreshToken, ...result } = await authService.register(
       req.body,
       req.headers["user-agent"],
+      clientOf(req),
     );
     setRefreshCookie(res, refreshToken);
     res.status(201).json(result);
@@ -54,6 +74,7 @@ authRouter.post(
     const { refreshToken, ...result } = await authService.login(
       req.body,
       req.headers["user-agent"],
+      clientOf(req),
     );
     setRefreshCookie(res, refreshToken);
     res.json(result);
@@ -129,6 +150,7 @@ authRouter.post(
     const { refreshToken, ...result } = await authService.loginWithCode(
       req.body,
       req.headers["user-agent"],
+      clientOf(req),
     );
     setRefreshCookie(res, refreshToken);
     res.json(result);
@@ -222,6 +244,7 @@ authRouter.post("/refresh", async (req, res) => {
   const { refreshToken, ...result } = await authService.refresh(
     token,
     req.headers["user-agent"],
+    clientOf(req),
   );
   setRefreshCookie(res, refreshToken);
   res.json(result);
@@ -245,13 +268,21 @@ authRouter.get("/sessions", requireAuth, async (req, res) => {
   const sessions = await prisma.refreshToken.findMany({
     where: { userId: currentUserId(req), revokedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
-    select: { id: true, tokenHash: true, userAgent: true, createdAt: true, expiresAt: true },
+    select: {
+      id: true,
+      tokenHash: true,
+      userAgent: true,
+      client: true,
+      createdAt: true,
+      expiresAt: true,
+    },
   });
 
   res.json({
     sessions: sessions.map((session) => ({
       id: session.id,
       userAgent: session.userAgent,
+      client: session.client,
       createdAt: session.createdAt.toISOString(),
       expiresAt: session.expiresAt.toISOString(),
       current: session.tokenHash === currentHash,

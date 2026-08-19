@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Attachment, Message, User } from "@prisma/client";
 import type { MessageDto } from "@messenger/shared";
-import { fileUrl } from "../../lib/storage.js";
+import { fileUrl, thumbUrlFor } from "../../lib/storage.js";
 import {
   editMessageSchema,
   mentionedUsernames,
@@ -19,6 +19,8 @@ import { requireChannelAccess } from "../../lib/access.js";
 import { param } from "../../lib/params.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { realtime } from "../../realtime/emitter.js";
+import { isOnline } from "../../realtime/index.js";
+import { notify, pushEnabled } from "../push/service.js";
 import { can } from "@messenger/shared";
 
 type FullMessage = Message & {
@@ -71,6 +73,7 @@ function toDto(message: FullMessage, viewerId: string): MessageDto {
       // Ссылку собираем здесь: в базе лежит только ключ хранилища,
       // поэтому переезд на S3 не потребует переписывать данные.
       url: fileUrl(a.storageKey),
+      thumbUrl: thumbUrlFor(a.storageKey, a.width),
       width: a.width,
       height: a.height,
     })),
@@ -184,6 +187,13 @@ channelsRouter.post(
     // только там, куда человек и так смотрит.
     await announceActivity(channelId, message.id, userId);
 
+    // Тем, у кого мессенджер закрыт, — уведомление на телефон. Ответ
+    // этого не ждёт: письма идут через чужую службу доставки, и её
+    // задержка не должна становиться задержкой отправки.
+    void pushToAbsent(channelId, dto).catch((error: unknown) => {
+      console.warn("Уведомления не разосланы:", error);
+    });
+
     res.status(201).json({ message: dto });
   },
 );
@@ -213,6 +223,75 @@ async function announceActivity(
   for (const participant of channel.participants) {
     realtime().to(room.user(participant.userId)).emit("channel:activity", payload);
   }
+}
+
+/**
+ * Постучаться в телефон тому, кого сейчас нет в сети.
+ *
+ * Кого нет — знает realtime: нет ни одного открытого соединения,
+ * значит мессенджер закрыт и живое событие человеку никуда не придёт.
+ * Тем, кто в сети, писать не надо ни в коем случае: у них сообщение
+ * и так уже на экране, а второе уведомление поверх — это ровно то,
+ * из-за чего уведомления и выключают.
+ *
+ * Молча и в стороне от ответа: сообщение уже создано и разослано,
+ * и падать из-за недоставленного письма ему нельзя.
+ */
+async function pushToAbsent(channelId: string, message: MessageDto): Promise<void> {
+  if (!pushEnabled) return;
+
+  const channel = await prisma.channel.findUniqueOrThrow({
+    where: { id: channelId },
+    select: {
+      name: true,
+      serverId: true,
+      server: { select: { name: true } },
+      participants: { select: { userId: true } },
+    },
+  });
+
+  // В канале сервера адресаты — все его участники, а не участники
+  // канала: у канала сервера своего списка нет.
+  const recipients = channel.serverId
+    ? (
+        await prisma.serverMember.findMany({
+          where: { serverId: channel.serverId },
+          select: { userId: true },
+        })
+      ).map((member) => member.userId)
+    : channel.participants.map((participant) => participant.userId);
+
+  const author = message.author.displayName;
+  // В личной переписке имени достаточно: канал и есть человек.
+  // В канале сервера без «где» уведомление бесполезно — их много.
+  const title = channel.serverId ? `${author} · #${channel.name ?? "канал"}` : author;
+
+  await Promise.all(
+    recipients
+      .filter((userId) => userId !== message.author.id && !isOnline(userId))
+      .map((userId) =>
+        notify(userId, {
+          title,
+          body: preview(message),
+          channelId,
+          // Один канал — одно уведомление: пять сообщений подряд
+          // заменяют друг друга, а не выстраиваются столбиком.
+          tag: channelId,
+        }),
+      ),
+  );
+}
+
+/** Что показать в уведомлении. Длинное режем: в шторке всё равно
+ *  видно две строки, а везти килобайт текста через службу доставки
+ *  незачем. */
+function preview(message: MessageDto): string {
+  const text = message.content?.trim() ?? "";
+  if (text) return text.length > 140 ? `${text.slice(0, 139)}…` : text;
+  if (message.attachments.length > 0) {
+    return message.attachments.length === 1 ? "Вложение" : `Вложений: ${message.attachments.length}`;
+  }
+  return "Новое сообщение";
 }
 
 /** Упоминания считаем на сервере, а не доверяем клиенту: иначе любой

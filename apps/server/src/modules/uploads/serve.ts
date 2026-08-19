@@ -3,7 +3,7 @@ import { Router } from "express";
 import { prisma } from "../../db/client.js";
 import { param } from "../../lib/params.js";
 import { notFound } from "../../lib/errors.js";
-import { UPLOADS_DIR, isInlineType } from "../../lib/storage.js";
+import { UPLOADS_DIR, baseKeyOf, isInlineType } from "../../lib/storage.js";
 
 /** Раздача загруженных файлов.
  *
@@ -18,7 +18,9 @@ import { UPLOADS_DIR, isInlineType } from "../../lib/storage.js";
  *  и получит доступ к сессии того, кто по нему кликнул. */
 export const uploadsServeRouter: Router = Router();
 
-const KEY_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}\.[a-z0-9]{2,5}$/;
+// Второй вариант — уменьшенная копия: тот же ключ с «.thumb».
+// Отдельной записи в базе у неё нет, права проверяются по оригиналу.
+const KEY_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}(\.thumb)?\.[a-z0-9]{2,5}$/;
 
 uploadsServeRouter.get("/:key", async (req, res) => {
   const key = param(req, "key");
@@ -26,8 +28,9 @@ uploadsServeRouter.get("/:key", async (req, res) => {
   // попытки выйти из папки отсекаются на входе.
   if (!KEY_PATTERN.test(key)) throw notFound("Файл не найден");
 
+  const isThumb = key.endsWith(".thumb.webp");
   const attachment = await prisma.attachment.findUnique({
-    where: { storageKey: key },
+    where: { storageKey: baseKeyOf(key) },
     select: { filename: true, mimeType: true },
   });
   if (!attachment) throw notFound("Файл не найден");
@@ -45,6 +48,16 @@ uploadsServeRouter.get("/:key", async (req, res) => {
   );
 
   res.sendFile(path.join(UPLOADS_DIR, key), (error) => {
-    if (error && !res.headersSent) res.status(404).end();
+    if (!error || res.headersSent) return;
+    // Превью может не оказаться: файл загружен до того, как мы начали
+    // их делать, или пережатие не удалось. Отдаём оригинал — картинка
+    // на месте, просто тяжелее. Пустое место в ленте было бы хуже.
+    if (isThumb) {
+      res.sendFile(path.join(UPLOADS_DIR, baseKeyOf(key)), (second) => {
+        if (second && !res.headersSent) res.status(404).end();
+      });
+      return;
+    }
+    res.status(404).end();
   });
 });
