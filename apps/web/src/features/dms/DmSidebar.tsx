@@ -1,17 +1,19 @@
 import { useMemo } from "react";
 import { MessageSquare, UserPlus } from "lucide-react";
-import { hasUnread, useStore } from "@/lib/store";
+import { hasUnread, usePresence, useStore } from "@/lib/store";
 import { Avatar } from "@/components/Avatar";
 import { cn } from "@/lib/utils";
 
-/** Список личных переписок.
+/** Список личных переписок — отдельный раздел, открывается кнопкой
+ *  в рейле слева.
  *
- *  Показывается двумя способами: как отдельный раздел из рейла
- *  (со своей шапкой) и как вкладка «Личные» внутри сервера — там
- *  шапка уже есть, чужая, и вторая была бы лишней. */
-export function DmSidebar({ withHeader = true }: { withHeader?: boolean }) {
+ *  Раньше он же показывался вкладкой «Личные» внутри сервера, и ради
+ *  этого умел прятать свою шапку. Вкладку убрали как дублирующую ту же
+ *  кнопку, поэтому и прятать больше нечего. */
+export function DmSidebar() {
   const dms = useStore((s) => s.dms);
   const me = useStore((s) => s.me);
+  const statusOf = usePresence();
   const channelId = useStore((s) => s.channelId);
   const selectChannel = useStore((s) => s.selectChannel);
   const hasServers = useStore((s) => s.servers.length > 0);
@@ -30,11 +32,11 @@ export function DmSidebar({ withHeader = true }: { withHeader?: boolean }) {
 
   return (
     <>
-      {withHeader && (
-        <div className="flex h-head shrink-0 items-center px-4 font-semibold text-bright shadow-[0_1px_0_rgba(0,0,0,0.2)]">
-          Личные сообщения
-        </div>
-      )}
+      {/* pt-safe — ради телефона: панель начинается от самого верха
+          экрана, и без отступа заголовок уезжает под вырез камеры. */}
+      <div className="flex h-head shrink-0 items-center px-4 pt-safe font-semibold text-bright shadow-[0_1px_0_rgba(0,0,0,0.2)]">
+        Личные сообщения
+      </div>
 
       <div className="flex-1 overflow-y-auto p-2">
         {/* Друзья стоят над списком переписок, а не в рейле: рейл —
@@ -100,7 +102,7 @@ export function DmSidebar({ withHeader = true }: { withHeader?: boolean }) {
                           : "text-muted hover:bg-hover hover:text-body",
                     )}
                   >
-                    <Avatar user={other} size={32} status={other.status} />
+                    <Avatar user={other} size={32} status={statusOf(other)} />
                     <span
                       className={cn(
                         "truncate text-[15px]",

@@ -1,20 +1,23 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Hash, LogOut, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
-import { can, type ChannelDto, type ChannelType } from "@messenger/shared";
-import { currentServer, hasUnread, useStore } from "@/lib/store";
-import { Tabs } from "@/components/ui/Tabs";
+import { Hash, Pencil, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
+import { can, type ChannelDto, type ChannelType, type ChosenStatus } from "@messenger/shared";
+import { currentServer, hasUnread, usePresence, useStore } from "@/lib/store";
 import { Avatar } from "@/components/Avatar";
 import { InviteDialog } from "@/features/invites/InviteDialog";
 import { DmSidebar } from "@/features/dms/DmSidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { VoiceBar } from "@/features/voice/VoiceBar";
 import { VoiceMembers } from "@/features/voice/VoiceMembers";
+import { SelfAudioControls } from "@/features/voice/SelfAudioControls";
 import { useVoice } from "@/features/voice/useVoice";
+import { ServerSettingsDialog } from "@/features/servers/ServerSettingsDialog";
 import { CreateChannelDialog } from "./CreateChannelDialog";
+import { StatusMenu } from "@/features/shell/StatusMenu";
 import { api } from "@/lib/api";
 import { setAccessToken } from "@/lib/api";
 import { disconnectSocket } from "@/lib/socket";
+import { forgetEverything } from "@/lib/offline";
 import { cn } from "@/lib/utils";
 
 export function ChannelSidebar() {
@@ -22,14 +25,14 @@ export function ChannelSidebar() {
   const channelId = useStore((s) => s.channelId);
   const selectChannel = useStore((s) => s.selectChannel);
   const me = useStore((s) => s.me);
-  const sidebarTab = useStore((s) => s.sidebarTab);
-  const setSidebarTab = useStore((s) => s.setSidebarTab);
-  const dms = useStore((s) => s.dms);
-  const readStates = useStore((s) => s.readStates);
+  const statusOf = usePresence();
 
   const [inviting, setInviting] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState<ChannelType | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const myStatus = useStore((s) => s.myStatus);
   const voiceChannelId = useStore((s) => s.voiceChannelId);
   const { join: joinVoice } = useVoice();
 
@@ -37,52 +40,64 @@ export function ChannelSidebar() {
   const voice = server?.channels.filter((c) => c.type === "VOICE") ?? [];
   const mayCreate = server ? can(server.role, "channel:create") : false;
 
-  // Счётчик на вкладке «Личные»: сколько переписок ждут ответа.
-  // Без него, уйдя в каналы, о новом сообщении можно узнать только
-  // случайно — список ЛС в этот момент не виден.
-  const dmsWaiting = useMemo(
-    () => dms.filter((dm) => dm.id !== channelId && hasUnread(readStates.get(dm.id))).length,
-    [dms, readStates, channelId],
-  );
-
-  const tabs = [
-    { value: "channels" as const, label: "Каналы" },
-    { value: "dms" as const, label: "Личные", badge: dmsWaiting },
-  ];
-
-  // Вкладки нужны только внутри сервера. В разделе ЛС переключать
-  // нечего: каналов там нет по определению.
-  const showTabs = Boolean(server);
-  const showDms = !server || sidebarTab === "dms";
+  // Вкладок «Каналы / Личные» здесь больше нет: они дублировали
+  // кнопку личных сообщений в рейле слева, которая делает ровно то же
+  // самое. Раздел выбирается там же, где сервер, — одним способом,
+  // а не двумя. Счётчик непрочитанных переписок переехал на ту кнопку.
+  const showDms = !server;
 
   async function logout() {
     await api.post("/auth/logout").catch(() => undefined);
     setAccessToken(null);
     disconnectSocket();
+    // Стираем и сохранённую переписку. Иначе «выйти» означало бы
+    // «выйти, но всё осталось лежать на диске и откроется без пароля
+    // у любого, кто откроет приложение без сети».
+    forgetEverything();
     useStore.getState().reset();
   }
 
   return (
-    <div className="flex w-side shrink-0 flex-col bg-sidebar">
+    // w-60 (240) до md и w-side (264) от него: шире столбец нужен там,
+    // где рядом стоит лента, а не там, где он её закрывает.
+    <div className="flex w-60 shrink-0 flex-col bg-sidebar md:w-side">
       {/* Раздел ЛС занимает то же место, что список каналов: панель
           пользователя внизу общая для обоих. */}
+      {/* Баннер сервера — награда второго уровня. Стоит над всем
+          остальным и ничего не закрывает: это картинка, а не фон,
+          и текст поверх неё не читался бы. */}
+      {server?.bannerUrl && (
+        <img
+          src={server.bannerUrl}
+          alt=""
+          className="h-24 w-full shrink-0 object-cover"
+        />
+      )}
+
       {server && (
-        <div className="flex h-head shrink-0 items-center gap-2 px-4 font-semibold text-bright shadow-[0_1px_0_rgba(0,0,0,0.2)]">
-          <span className="truncate">{server.name}</span>
+        <div className="flex h-head shrink-0 items-center gap-1 px-4 pt-safe font-semibold text-bright shadow-[0_1px_0_rgba(0,0,0,0.2)]">
+          <span className="mr-auto truncate">{server.name}</span>
+          {/* Настройки сервера — только тем, кто может его править.
+              Остальным кнопка, которая всегда отвечает «нельзя»,
+              не нужна. */}
+          {can(server.role, "server:edit") && (
+            <button
+              onClick={() => setEditing(true)}
+              title="Настройки сервера"
+              aria-label="Настройки сервера"
+              className="shrink-0 rounded p-1 text-muted hover:bg-hover hover:text-body"
+            >
+              <Pencil className="size-5" />
+            </button>
+          )}
           <button
             onClick={() => setInviting(true)}
             title="Пригласить друзей"
             aria-label="Пригласить друзей"
-            className="ml-auto shrink-0 rounded p-1 text-muted hover:bg-hover hover:text-body"
+            className="shrink-0 rounded p-1 text-muted hover:bg-hover hover:text-body"
           >
             <UserPlus className="size-5" />
           </button>
-        </div>
-      )}
-
-      {showTabs && (
-        <div className="px-2 pt-2">
-          <Tabs items={tabs} value={sidebarTab} onChange={setSidebarTab} />
         </div>
       )}
 
@@ -99,7 +114,7 @@ export function ChannelSidebar() {
           className="flex min-h-0 flex-1 flex-col"
         >
           {showDms ? (
-            <DmSidebar withHeader={!server} />
+            <DmSidebar />
           ) : (
             <div className="flex-1 overflow-y-auto p-2">
               <Category
@@ -109,18 +124,30 @@ export function ChannelSidebar() {
                 onSelect={selectChannel}
                 onAdd={mayCreate ? () => setCreating("TEXT") : undefined}
               />
-              {/* Голосовой канал открывается кликом не как текстовый:
-                  нажатие сразу подключает к разговору. Заходить
-                  в «пустую комнату», а потом искать кнопку «войти» —
-                  лишний шаг там, где смысл канала ровно один. */}
+              {/* Клик по голосовому каналу делает две вещи сразу:
+                  подключает к разговору и открывает сам канал справа.
+                  Заходить в «пустую комнату», а потом искать кнопку
+                  «войти» — лишний шаг там, где смысл канала ровно один.
+                  А открывать надо потому, что иначе не видно ни состава,
+                  ни демонстраций — в том числе своей. */}
               <Category
                 title="Голосовые каналы"
                 channels={voice}
                 active={voiceChannelId}
-                onSelect={(id) => void joinVoice(id)}
+                onSelect={(id) => {
+                  selectChannel(id);
+                  void joinVoice(id);
+                }}
                 onAdd={mayCreate ? () => setCreating("VOICE") : undefined}
                 renderAfter={(id) => <VoiceMembers channelId={id} />}
               />
+
+              {/* Участников здесь больше нет — ни на каком экране.
+                  На обычном они стоят своим столбцом справа, на телефоне
+                  выезжают своей шторкой, тоже справа. Под каналами они
+                  делили с ними прокрутку: до «кто в сети» приходилось
+                  листать мимо всех каналов сервера, и находились они
+                  слева, хотя всюду стоят справа. */}
             </div>
           )}
         </motion.div>
@@ -129,35 +156,59 @@ export function ChannelSidebar() {
       <VoiceBar />
 
       {me && (
-        <div className="flex h-[52px] shrink-0 items-center gap-2 bg-panel px-2">
-          <Avatar user={me} size={32} status={me.status} />
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-sm font-semibold text-bright">{me.displayName}</div>
-            <div className="truncate text-xs text-muted">@{me.username}</div>
-          </div>
+        // min-h вместо h: снизу добавляется безопасная зона телефона,
+        // и при жёсткой высоте она съедала бы саму строку.
+        <div className="relative flex min-h-[52px] shrink-0 items-center gap-0.5 bg-panel px-2 pb-safe">
+          {/* Нажатие на себя открывает выбор статуса — там же, где
+              человек его и ищет: на собственном имени в углу.
+              Имя ужимается первым: кнопки нужны целиком, а имя
+              и в обрезанном виде узнаётся. */}
+          <button
+            onClick={() => setStatusOpen((open) => !open)}
+            title="Статус"
+            aria-label="Выбрать статус"
+            aria-haspopup="menu"
+            aria-expanded={statusOpen}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded p-1 text-left hover:bg-hover"
+          >
+            <Avatar user={me} size={32} status={statusOf(me)} />
+            <span className="min-w-0 flex-1 leading-tight">
+              <span className="block truncate text-sm font-semibold text-bright">
+                {me.displayName}
+              </span>
+              <span className="block truncate text-xs text-muted">
+                {STATUS_WORD[myStatus]}
+              </span>
+            </span>
+          </button>
+
+          {statusOpen && <StatusMenu onClose={() => setStatusOpen(false)} />}
+
+          {/* Микрофон и наушники здесь, а не в полоске разговора:
+              выключить микрофон бывает надо и до входа в разговор,
+              а полоска появляется только внутри него. */}
+          <SelfAudioControls />
+
           <button
             onClick={() => setSettingsOpen(true)}
             title="Настройки"
             aria-label="Настройки"
-            className="rounded p-1.5 text-muted hover:bg-hover hover:text-bright"
+            className="shrink-0 rounded p-2 text-muted hover:bg-hover hover:text-bright md:p-1"
           >
             <Settings className="size-5" />
-          </button>
-          <button
-            onClick={() => void logout()}
-            title="Выйти"
-            aria-label="Выйти"
-            className="rounded p-1.5 text-muted hover:bg-hover hover:text-danger"
-          >
-            <LogOut className="size-5" />
           </button>
         </div>
       )}
 
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog onClose={() => setSettingsOpen(false)} onLogout={() => void logout()} />
+      )}
 
       {inviting && server && (
         <InviteDialog serverId={server.id} onClose={() => setInviting(false)} />
+      )}
+      {editing && server && (
+        <ServerSettingsDialog server={server} onClose={() => setEditing(false)} />
       )}
       {creating && server && (
         <CreateChannelDialog
@@ -201,7 +252,10 @@ function Category({
             onClick={onAdd}
             title={`Создать канал: ${title.toLowerCase()}`}
             aria-label={`Создать канал: ${title.toLowerCase()}`}
-            className="mr-1 rounded p-0.5 text-muted opacity-0 group-hover/cat:opacity-100 focus-visible:opacity-100 hover:text-bright"
+            // Пальцем навести нельзя, и кнопка «создать канал»
+            // на телефоне просто не существовала. Показываем её там
+            // всегда — прятать нечего, места она не занимает.
+            className="mr-1 rounded p-2 text-muted opacity-0 group-hover/cat:opacity-100 focus-visible:opacity-100 hover:text-bright md:p-0.5 pointer-coarse:opacity-100"
           >
             <Plus className="size-4" />
           </button>
@@ -261,3 +315,15 @@ function Category({
     </section>
   );
 }
+
+/** Подпись под именем: что человек сам о себе выбрал.
+ *
+ *  Раньше там стоял «@логин» — тот же, что и в профиле, и в шапке,
+ *  и никому в третий раз не нужный. Статус же меняется, и видеть
+ *  его надо ровно там, где его меняют. */
+const STATUS_WORD: Record<ChosenStatus, string> = {
+  online: "В сети",
+  idle: "Неактивен",
+  dnd: "Не беспокоить",
+  invisible: "Невидимый",
+};

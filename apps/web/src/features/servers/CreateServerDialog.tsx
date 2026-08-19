@@ -18,8 +18,10 @@ export function CreateServerDialog({ onClose }: { onClose: () => void }) {
     try {
       const r = await api.post<{ server: ServerDto }>("/servers", { name: name.trim() });
       const store = useStore.getState();
-      // Сервер приходит без роли — создатель всегда владелец.
-      store.setServers([...store.servers, { ...r.server, role: "OWNER" }]);
+      // Сервер приходит целиком, вместе с ролью, уровнем и списком
+      // поддержавших: собирать его по кусочкам на клиенте — верный
+      // способ однажды забыть поле и уронить приложение.
+      store.setServers([...store.servers, r.server]);
       store.selectServer(r.server.id);
       onClose();
     } catch (err) {

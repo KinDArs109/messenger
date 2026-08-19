@@ -102,7 +102,7 @@ export function InvitePage({ code, onDone }: { code: string; onDone: () => void 
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-chat p-4">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-chat p-4">
       <div className="flex w-full max-w-[420px] flex-col items-center rounded-md bg-sidebar p-8 text-center">
         {children}
       </div>

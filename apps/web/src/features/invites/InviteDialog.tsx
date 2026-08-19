@@ -48,7 +48,18 @@ export function InviteDialog({ serverId, onClose }: { serverId: string; onClose:
   }
 
   return (
-    <Dialog title="Пригласить друзей" description="Ссылка действует неделю" onClose={onClose}>
+    <Dialog title="Пригласить друзей" onClose={onClose}>
+      {/* Друзья первыми, ссылка ниже.
+          Раньше было наоборот, и получалось, что единственный
+          предложенный способ — переслать ссылку, хотя позвать друга
+          одной кнопкой и проще, и надёжнее: он получит приглашение
+          в мессенджере, а не в чужой переписке. */}
+      <FriendInvites serverId={serverId} url={url} />
+
+      <h3 className="mt-5 mb-2 border-t border-line pt-4 text-xs font-bold tracking-wide text-muted uppercase">
+        Или ссылкой — для тех, кого нет в друзьях
+      </h3>
+
       {error ? (
         <p role="alert" className="rounded-sm bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
@@ -70,11 +81,9 @@ export function InviteDialog({ serverId, onClose }: { serverId: string; onClose:
         </div>
       )}
 
-      <FriendInvites serverId={serverId} url={url} />
-
-      <p className="mt-4 text-xs text-faint">
-        Ссылка работает, пока включён компьютер с мессенджером. Отправляйте её только тем, кого
-        действительно зовёте: по ней вступают без подтверждения.
+      <p className="mt-3 text-xs text-faint">
+        Действует неделю и работает, пока включён компьютер с мессенджером. Отправляйте только
+        тем, кого действительно зовёте: по ней вступают без подтверждения.
       </p>
     </Dialog>
   );
@@ -110,8 +119,11 @@ function FriendInvites({ serverId, url }: { serverId: string; url: string }) {
     try {
       const dm = await api.post<{ dm: DmChannelDto }>("/dms", { userId: user.id });
       useStore.getState().addDm(dm.dm);
+      // Ссылка внутри нужна: по ней клиент и рисует карточку с кнопкой
+      // «Принять». Читать её глазами больше не придётся, но она
+      // остаётся рабочей — переслать в другой мессенджер можно так же.
       await api.post(`/channels/${dm.dm.id}/messages`, {
-        content: `Приглашаю на сервер «${serverName}»: ${url}`,
+        content: `Приглашаю на сервер «${serverName}» ${url}`,
       });
       setSent(new Set([...sent, user.id]));
     } catch (err) {
@@ -124,7 +136,7 @@ function FriendInvites({ serverId, url }: { serverId: string; url: string }) {
   if (!url) return null;
 
   return (
-    <div className="mt-5 border-t border-line pt-4">
+    <div>
       <h3 className="mb-2 text-xs font-bold tracking-wide text-muted uppercase">Позвать друзей</h3>
 
       {candidates.length === 0 ? (

@@ -96,7 +96,10 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-chat p-4">
+    // flex-1, а не min-h-screen: в приложении сверху стоит своя полоса
+    // окна, и «на всю высоту экрана» означало бы высоту экрана плюс
+    // полоса — то есть лишнюю прокрутку.
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-chat p-4">
       <motion.div
         className="w-full max-w-[440px]"
         initial={{ opacity: 0, y: 12 }}
