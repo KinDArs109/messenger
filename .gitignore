@@ -47,3 +47,33 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Ключ подписи Android — самое опасное, что тут есть.
+#
+# Android считает приложение своим по подписи: обновление, подписанное
+# другим ключом, поверх старого не встанет — телефон потребует сначала
+# удалить приложение, а с ним уедут и данные. Утёкший ключ — это чужое
+# «обновление», которое телефон примет как наше.
+#
+# Хранить его надо там же, где резервные копии базы, и уж точно
+# не в репозитории — тем более в открытом.
+apps/android/signing/
+
+# Сборки Android: apk, aab и всё, что делает gradle. Восстанавливается
+# одной командой, весит десятки мегабайт и меняется каждый раз.
+apps/android/build/
+apps/android/app/build/
+apps/android/*.apk
+apps/android/*.apk.idsig
+apps/android/*.aab
+apps/android/manifest-checksum.txt
+
+# Сборки оболочки. Правило про apps/desktop/release/ уже есть выше,
+# но рядом успели завестись release2 и release-1017 — те же сто
+# мегабайт на файл.
+apps/desktop/release*/
+apps/android/.gradle/
+apps/android/gradle/
+apps/android/gradlew
+apps/android/gradlew.bat
+apps/android/local.properties
