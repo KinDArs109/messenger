@@ -40,7 +40,11 @@ export function Tabs<T extends string>({
     <div
       role="tablist"
       className={cn(
-        "flex items-center gap-1",
+        // flex-wrap, потому что вкладок может стать больше, чем влезает
+        // в строку: пятая («Приложение») вылезала за край окна настроек
+        // и обрезалась. Перенос на вторую строку лучше, чем вкладка,
+        // до которой не дотянуться.
+        "flex flex-wrap items-center gap-1",
         look === "pill" && "rounded-lg bg-rail p-1",
         look === "line" && "border-b border-line",
         className,
@@ -62,7 +66,9 @@ export function Tabs<T extends string>({
             aria-selected={active}
             onClick={() => onChange(item.value)}
             className={cn(
-              "relative flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-1.5",
+              // basis-auto, а не flex-1 по умолчанию: с нулевой основой
+              // перенос не срабатывает вовсе — строка просто переполняется.
+              "relative flex flex-1 basis-auto items-center justify-center gap-2 rounded-md px-3 py-1.5",
               "text-sm font-medium transition-colors duration-150",
               look === "line" && "rounded-none pb-2.5",
               active ? "text-bright" : "text-muted hover:text-body",

@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { CornerUpLeft, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Copy, CornerUpLeft, Pencil, Trash2 } from "lucide-react";
 import { can, LIMITS, type MessageDto } from "@messenger/shared";
 import { api, ApiError } from "@/lib/api";
 import { currentServer, useStore } from "@/lib/store";
 import { Avatar } from "@/components/Avatar";
 import { Attachments } from "./Attachments";
+import { findInviteCode, InviteCard } from "@/features/invites/InviteCard";
 import { MessageContent } from "./MessageContent";
 import { ReactionPicker, Reactions } from "./Reactions";
-import { formatDateTime, formatTime } from "@/lib/utils";
+import { cn, formatDateTime, formatTime } from "@/lib/utils";
+import { useLongPress } from "@/lib/useLongPress";
 import { usePreferences } from "@/lib/preferences";
 
 export function MessageRow({ message, grouped }: { message: MessageDto; grouped: boolean }) {
@@ -19,6 +21,26 @@ export function MessageRow({ message, grouped }: { message: MessageDto; grouped:
   const [error, setError] = useState<string | null>(null);
   const { prefs } = usePreferences();
   const compact = prefs.compact;
+  const inviteCode = useMemo(() => findInviteCode(message.content), [message.content]);
+
+  // Панель действий на телефоне: наведения там нет, и без этого
+  // до «ответить», «изменить» и «удалить» было не добраться вовсе.
+  const [held, setHeld] = useState(false);
+  const hold = useLongPress(() => setHeld(true));
+
+  useEffect(() => {
+    if (!held) return;
+    // Закрываем по касанию где угодно, включая саму панель: любое
+    // её действие всё равно заканчивает работу с этим сообщением.
+    const close = () => setHeld(false);
+    // Со следующего кадра, иначе то же самое нажатие, которое панель
+    // открыло, тут же её и закроет.
+    const id = window.setTimeout(() => document.addEventListener("pointerdown", close), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener("pointerdown", close);
+    };
+  }, [held]);
 
   const isAuthor = me?.id === message.author.id;
   // Править чужое нельзя никому, включая владельца: подменённые
@@ -43,7 +65,16 @@ export function MessageRow({ message, grouped }: { message: MessageDto; grouped:
   return (
     <article
       data-message={message.id}
-      className={`group relative flex gap-4 px-4 py-0.5 hover:bg-hover ${gap}`}
+      {...hold}
+      className={cn(
+        "group relative flex gap-4 px-4 py-0.5 hover:bg-hover",
+        // Пальцем удержание открывает наши действия, а не системное
+        // выделение текста. Взамен в самой панели есть «копировать» —
+        // иначе с телефона нельзя было бы забрать ни строчки.
+        "pointer-coarse:select-none",
+        held && "bg-hover",
+        gap,
+      )}
     >
       {/* Цитата над ответом. Показываем строку, а не всё сообщение:
           иначе лента превращается в дерево и читать её нельзя. */}
@@ -102,6 +133,10 @@ export function MessageRow({ message, grouped }: { message: MessageDto; grouped:
                 )}
               </p>
             )}
+            {/* Приглашение показываем карточкой с кнопкой «Принять».
+                Голую ссылку надо заметить, нажать, уйти в браузер
+                и вернуться — четыре действия там, где нужно одно. */}
+            {inviteCode && <InviteCard code={inviteCode} />}
             <Attachments items={message.attachments} />
             <Reactions messageId={message.id} reactions={message.reactions} />
           </>
@@ -125,7 +160,12 @@ export function MessageRow({ message, grouped }: { message: MessageDto; grouped:
       {/* Панель действий появляется при наведении и по фокусу с клавиатуры —
           иначе до неё нельзя добраться без мыши. */}
       {!editing && (
-        <div className="absolute -top-3 right-4 hidden gap-0.5 rounded border border-line bg-sidebar p-0.5 shadow-md group-focus-within:flex group-hover:flex">
+        <div
+          className={cn(
+            "absolute -top-3 right-4 z-10 gap-0.5 rounded border border-line bg-sidebar p-0.5 shadow-md",
+            held ? "flex" : "hidden group-focus-within:flex group-hover:flex",
+          )}
+        >
           <ReactionPicker messageId={message.id} />
           <button
             onClick={() => setReplyTo(message)}
@@ -135,6 +175,18 @@ export function MessageRow({ message, grouped }: { message: MessageDto; grouped:
           >
             <CornerUpLeft className="size-4" />
           </button>
+          {/* Только пальцем: мышью текст выделяют и копируют как везде,
+              и лишняя кнопка там была бы шумом. */}
+          {message.content && (
+            <button
+              onClick={() => void navigator.clipboard?.writeText(message.content)}
+              title="Копировать текст"
+              aria-label="Копировать текст сообщения"
+              className="hidden rounded p-1.5 text-muted hover:bg-hover hover:text-body pointer-coarse:block"
+            >
+              <Copy className="size-4" />
+            </button>
+          )}
           {mayEdit && (
             <button
               onClick={() => setEditing(true)}

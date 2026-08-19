@@ -11,7 +11,7 @@ import { motion } from "motion/react";
  *  ждать, и превращает паузу в часть приложения. */
 export function Splash({ label = "Загружаем…" }: { label?: string }) {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-7 bg-chat">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-7 bg-chat">
       <div className="relative flex size-28 items-center justify-center">
         {/* Два расходящихся кольца. Второе отстаёт на треть цикла —
             получается непрерывная волна, а не пульс в один такт. */}
