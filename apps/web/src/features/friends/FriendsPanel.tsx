@@ -3,11 +3,13 @@ import { AnimatePresence, motion } from "motion/react";
 import { Check, MessageSquare, UserPlus, UserX, X } from "lucide-react";
 import type { DmChannelDto, FriendshipDto } from "@messenger/shared";
 import { api, ApiError } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { usePresence, useStore } from "@/lib/store";
 import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
+import { PaneToggle } from "@/features/shell/MobileShell";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { usePlayingOf } from "./usePlaying";
 
 type Tab = "all" | "pending" | "add";
 
@@ -37,9 +39,10 @@ export function FriendsPanel() {
   ];
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-head shrink-0 items-center gap-3 px-4 shadow-[0_1px_0_rgba(0,0,0,0.2)]">
-        <UserPlus className="size-6 text-faint" />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex h-head shrink-0 items-center gap-3 px-2 pt-safe shadow-[0_1px_0_rgba(0,0,0,0.2)] md:px-4">
+        <PaneToggle />
+        <UserPlus className="size-6 shrink-0 text-faint" />
         <h1 className="font-semibold text-bright">Друзья</h1>
       </header>
 
@@ -75,14 +78,38 @@ export function FriendsPanel() {
 }
 
 function FriendList({ items, empty }: { items: FriendshipDto[]; empty: string }) {
+  const statusOf = usePresence();
+
+  /** Кто в сети — наверх.
+   *
+   *  Список друзей открывают затем, чтобы кому-то написать, а пишут
+   *  тому, кто сейчас за компьютером. Держать его в конце по алфавиту
+   *  значит заставлять искать глазами то, ради чего список и открыли.
+   *
+   *  Внутри каждой части — по имени, чтобы порядок не плясал при
+   *  каждом чужом входе и выходе. */
+  const sorted = useMemo(() => {
+    const rank = (f: FriendshipDto) => (statusOf(f.user) === "offline" ? 1 : 0);
+    return [...items].sort(
+      (a, b) => rank(a) - rank(b) || a.user.displayName.localeCompare(b.user.displayName, "ru"),
+    );
+  }, [items, statusOf]);
+
   if (items.length === 0) {
     return <p className="py-8 text-center text-sm text-muted">{empty}</p>;
   }
 
+  const online = sorted.filter((f) => statusOf(f.user) !== "offline").length;
+
   return (
     <ul className="space-y-1">
+      {online > 0 && (
+        <li className="px-2 pb-1 text-xs font-bold tracking-wide text-muted uppercase">
+          В сети — {online}
+        </li>
+      )}
       <AnimatePresence initial={false}>
-        {items.map((friendship) => (
+        {sorted.map((friendship) => (
           <motion.li
             key={friendship.id}
             layout
@@ -101,7 +128,9 @@ function FriendList({ items, empty }: { items: FriendshipDto[]; empty: string })
 
 function FriendRow({ friendship }: { friendship: FriendshipDto }) {
   const [busy, setBusy] = useState(false);
+  const statusOf = usePresence();
   const { user, status, direction } = friendship;
+  const playing = usePlayingOf(user.id);
 
   async function accept() {
     setBusy(true);
@@ -132,17 +161,25 @@ function FriendRow({ friendship }: { friendship: FriendshipDto }) {
 
   return (
     <div className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-hover">
-      <Avatar user={user} size={36} status={user.status} />
+      <Avatar user={user} size={36} status={statusOf(user)} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[15px] font-medium text-bright">{user.displayName}</div>
-        <div className="truncate text-xs text-muted">
-          @{user.username}
-          {status === "PENDING" && (
-            <span className="text-faint">
-              {direction === "incoming" ? " · хочет добавить вас" : " · заявка отправлена"}
-            </span>
-          )}
-        </div>
+        {/* Играет — вместо логина, а не рядом с ним: строка одна,
+            а «во что играет» интереснее, чем «как пишется его имя».
+            Логин нужен, только чтобы добавить в друзья, а он уже
+            добавлен. */}
+        {playing ? (
+          <div className="truncate text-xs text-accent">Играет в {playing}</div>
+        ) : (
+          <div className="truncate text-xs text-muted">
+            @{user.username}
+            {status === "PENDING" && (
+              <span className="text-faint">
+                {direction === "incoming" ? " · хочет добавить вас" : " · заявка отправлена"}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {status === "ACCEPTED" ? (

@@ -17,7 +17,13 @@ interface Props {
 
 export function Avatar({ user, size = 40, status, className }: Props) {
   return (
-    <div className={cn("relative shrink-0", className)} style={{ width: size, height: size }}>
+    // rounded-full на самой обёртке, а не только на картинке внутри:
+    // рамку «говорит» дорисовывают снаружи через ring, и на нескруглённой
+    // обёртке она получалась зелёным квадратом вокруг круглого аватара.
+    <div
+      className={cn("relative shrink-0 rounded-full", className)}
+      style={{ width: size, height: size }}
+    >
       {user.avatarUrl ? (
         <img
           src={user.avatarUrl}
