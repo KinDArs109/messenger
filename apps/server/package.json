@@ -17,7 +17,17 @@
     "db:up": "node scripts/pg.mjs up",
     "db:down": "node scripts/pg.mjs down",
     "db:status": "node scripts/pg.mjs status",
-    "check:nat": "tsx --env-file=.env scripts/check-nat.ts"
+    "check:nat": "tsx --env-file=.env scripts/check-nat.ts",
+    "check:screen": "tsx --env-file=.env scripts/check-screen.ts",
+    "check:images": "tsx --env-file=.env scripts/check-images.ts",
+    "check:upload": "tsx --env-file=.env scripts/check-upload.ts",
+    "stress": "tsx --env-file=.env scripts/stress.ts",
+    "check:video": "tsx --env-file=.env scripts/check-video.ts",
+    "check:roster": "tsx --env-file=.env scripts/check-roster.ts",
+    "check:pictures": "tsx --env-file=.env scripts/check-pictures.ts",
+    "check:turn": "tsx --env-file=.env scripts/check-turn.ts",
+    "bench": "tsx --env-file=.env scripts/bench.ts",
+    "fixture:call": "tsx --env-file=.env scripts/call-fixture.ts"
   },
   "dependencies": {
     "@messenger/shared": "*",
@@ -32,8 +42,10 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
     "qrcode": "^1.5.4",
+    "sharp": "^0.35.3",
     "socket.io": "^4.8.1",
     "ulid": "^3.0.1",
+    "web-push": "^3.6.7",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -44,6 +56,7 @@
     "@types/node": "^24.10.1",
     "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
+    "@types/web-push": "^3.6.4",
     "prisma": "^6.19.0",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.20.6"
