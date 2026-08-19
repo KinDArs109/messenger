@@ -1,16 +1,25 @@
 {
   "name": "@messenger/desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.27",
   "description": "Мессенджер",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win --publish never"
+    "dist": "electron-builder --win --publish never",
+    "release": "node scripts/release.mjs",
+    "check:overlay": "electron scripts/check-overlay.cjs",
+    "check:call": "electron scripts/check-call.cjs",
+    "check:app": "electron scripts/check-app.cjs",
+    "check:game": "electron scripts/check-game.cjs",
+    "check:release": "electron scripts/check-release.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",
     "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "build": {
     "appId": "ru.messenger.desktop",
@@ -21,11 +30,38 @@
       "output": "release",
       "buildResources": "build"
     },
-    "files": ["main.cjs", "preload.cjs"],
+    "files": [
+      "main.cjs",
+      "games.cjs",
+      "preload.cjs",
+      "splash.html",
+      "splash-preload.cjs",
+      "overlay.html",
+      "overlay-menu.html",
+      "overlay-preload.cjs",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://45.130.42.77.sslip.io/updates"
+      }
+    ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png"
     },
@@ -36,7 +72,7 @@
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "Мессенджер",
-      "artifactName": "Мессенджер-установка.exe",
+      "artifactName": "Messenger-Setup.exe",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
@@ -48,7 +84,7 @@
       "language": "1049"
     },
     "portable": {
-      "artifactName": "Мессенджер-portable.exe"
+      "artifactName": "Messenger-Portable.exe"
     }
   }
 }

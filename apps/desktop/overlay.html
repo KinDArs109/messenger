@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Разговор</title>
+    <style>
+      /* Оверлей поверх игры: видно, кто говорит, не сворачивая её.
+         Ради этого дискорд и держат запущенным.
+
+         Всё окно прозрачное и сквозное для мыши, поэтому здесь нет
+         ни фона страницы, ни возможности во что-то ткнуть. Единственная
+         задача разметки — оставаться читаемой поверх любой картинки:
+         и поверх ночного леса, и поверх снега. Отсюда тёмная подложка
+         под каждой строкой и обводка у текста. */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        user-select: none;
+      }
+
+      body {
+        background: transparent;
+        overflow: hidden;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        padding: 10px;
+        /* Масштаб приходит из настроек: на 1080p обычный размер
+           великоват, на 1440p мелковат. Само окно главный процесс
+           уже увеличил, здесь остаётся увеличить содержимое —
+           zoom меняет и размеры, и отступы разом, поэтому подбирать
+           каждую величину отдельно не нужно. */
+        zoom: var(--scale, 1);
+      }
+
+      #list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: flex-start;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px 4px 4px;
+        border-radius: 999px;
+        background: rgba(20, 21, 24, 0.72);
+        /* Тень наружу — чтобы строка не сливалась со светлым фоном
+           игры, когда день и снег. */
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+        max-width: 240px;
+      }
+
+      /* Кружок с буквой у тех, у кого аватара нет: пустой src браузер
+         рисует значком битой картинки, и поверх игры это выглядит
+         как поломка приложения. */
+      .avatar.stub {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #24262b;
+        color: #9aa0a8;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        object-fit: cover;
+        /* Обводка есть всегда, просто прозрачная: иначе строка
+           дёргалась бы на два пикселя в момент, когда человек
+           начинает говорить. */
+        border: 2px solid transparent;
+        transition: border-color 0.09s linear;
+      }
+
+      .row.speaking .avatar {
+        border-color: #4bb54b;
+      }
+
+      .name {
+        font-size: 13px;
+        line-height: 1.2;
+        font-weight: 600;
+        color: #b8bcc4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: color 0.09s linear;
+      }
+
+      .row.speaking .name {
+        color: #fff;
+      }
+
+      /* Выключенный микрофон — значком, а не цветом: цвет тут уже
+         занят под «говорит», и два смысла на одном канале различать
+         невозможно. */
+      .muted {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        fill: #e05252;
+      }
+
+      /* Показывает экран. Тем же способом, что и выключенный
+         микрофон, — значком: цвет здесь занят под «говорит». */
+      .shows {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        fill: #3576c0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="list"></div>
+
+    <script>
+      const list = document.getElementById("list");
+
+      const MIC_OFF =
+        '<svg class="muted" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M3.7 2.3 2.3 3.7l6 6V12a3.7 3.7 0 0 0 5.6 3.2l1.5 1.5A5.6 5.6 0 0 1 6.4 12H4.6a7.4 7.4 0 0 0 6.5 7.3V22h1.8v-2.7c1.1-.1 2.1-.5 3-1l4.4 4.4 1.4-1.4L3.7 2.3Z"/>' +
+        '<path d="M15.7 12.2V5a3.7 3.7 0 0 0-7.3-.8l7.3 8Z"/>' +
+        "</svg>";
+
+      // Звук выключен целиком — наушники с перечёркиванием. Рисуется
+      // вместо микрофона: «молчу» и «не слышу» — разные вещи, и вторая
+      // важнее, потому что говорить такому человеку бесполезно.
+      const SOUND_OFF =
+        '<svg class="muted deaf" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M3.7 2.3 2.3 3.7l3.4 3.4A9 9 0 0 0 3 14v5a3 3 0 0 0 3 3h2a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H5v-0a7 7 0 0 1 2.1-5l13.2 13.2 1.4-1.4L3.7 2.3Z"/>' +
+        '<path d="M12 5a7 7 0 0 1 7 7h-3a1 1 0 0 0-1 1v2.2l4 4A3 3 0 0 0 21 19v-5a9 9 0 0 0-13.2-8l1.5 1.5A7 7 0 0 1 12 5Z"/>' +
+        "</svg>";
+
+      const SCREEN_ON =
+        '<svg class="shows" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M3 4h18v12H3V4Zm2 2v8h14V6H5Zm0 12h14v2H5v-2Z"/>' +
+        "</svg>";
+
+      /** Строки не пересобираем каждый раз: список из четырёх человек
+       *  меняется по десять раз в секунду, пока идёт разговор, и полная
+       *  пересборка заставляла бы браузер заново декодировать аватары. */
+      const rows = new Map();
+
+      function render(people) {
+        const seen = new Set();
+
+        for (const person of people) {
+          seen.add(person.id);
+          let row = rows.get(person.id);
+
+          if (!row) {
+            row = document.createElement("div");
+            row.className = "row";
+            // Тег решается один раз, при появлении строки: картинка
+            // у человека либо есть, либо нет, и посреди разговора
+            // это не меняется.
+            const face = person.avatar
+              ? document.createElement("img")
+              : document.createElement("div");
+            face.className = person.avatar ? "avatar" : "avatar stub";
+            if (person.avatar) face.alt = "";
+            else face.textContent = (person.name || "?").trim().charAt(0).toUpperCase();
+            const name = document.createElement("span");
+            name.className = "name";
+            row.append(face, name);
+            rows.set(person.id, row);
+            list.append(row);
+            row._img = face;
+            row._name = name;
+          }
+
+          if (person.avatar && row._img.src !== person.avatar) row._img.src = person.avatar;
+          if (row._name.textContent !== person.name) row._name.textContent = person.name;
+          row.classList.toggle("speaking", Boolean(person.speaking));
+
+          // Один значок на двоих: выключенный звук вытесняет
+          // выключенный микрофон, а не встаёт рядом с ним.
+          const нужен = person.deafened ? "deaf" : person.muted ? "mic" : "";
+          const был = row.querySelector(".muted");
+          const какой = был ? (был.classList.contains("deaf") ? "deaf" : "mic") : "";
+          if (какой !== нужен) {
+            if (был) был.remove();
+            if (нужен) row.insertAdjacentHTML("beforeend", нужен === "deaf" ? SOUND_OFF : MIC_OFF);
+          }
+
+          const hasScreen = row.querySelector(".shows");
+          if (person.screen && !hasScreen) row.insertAdjacentHTML("beforeend", SCREEN_ON);
+          if (!person.screen && hasScreen) hasScreen.remove();
+        }
+
+        for (const [id, row] of rows) {
+          if (seen.has(id)) continue;
+          row.remove();
+          rows.delete(id);
+        }
+      }
+
+      // Отрисовку наружу — чтобы её можно было прогнать без оболочки.
+      // Заодно страница переживает отсутствие моста: открытая просто
+      // так, она покажет пустоту, а не ошибку в консоли.
+      window.__render = (state) => {
+        const data = Array.isArray(state) ? { people: state } : (state ?? {});
+        document.documentElement.style.setProperty("--scale", Number(data.scale) || 1);
+        render(Array.isArray(data.people) ? data.people : []);
+      };
+      window.overlay?.onState?.(window.__render);
+    </script>
+  </body>
+</html>

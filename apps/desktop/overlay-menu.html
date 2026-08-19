@@ -1,0 +1,1186 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Разговор</title>
+    <style>
+      /* Меню поверх игры.
+
+         Окно на весь экран, ловит мышь и держит фокус — в отличие
+         от постоянного окошка, которое сквозное. Поэтому здесь есть
+         и затемнение, и кнопки, и ползунки.
+
+         Цвета те же, что в мессенджере: это его меню, а не отдельная
+         программа. Палитра переписана руками, а не подключена файлом:
+         страница локальная и грузиться должна мгновенно, а тащить
+         ради семи цветов сборку стилей — дороже, чем их повторить. */
+      :root {
+        --bg: #16171a;
+        --panel: #101114;
+        --raised: #24262b;
+        --hover: #2b2e34;
+        --line: #2a2d33;
+        --text: #d3d6db;
+        --bright: #e6e7ea;
+        --muted: #9aa0a8;
+        --faint: #7c828b;
+        --accent: #3576c0;
+        --accent-hover: #2c63a4;
+        --online: #4bb54b;
+        --danger: #e05252;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        user-select: none;
+      }
+
+      body {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        color: var(--text);
+        font-size: 14px;
+        /* Затемнение — оно же подсказка, что игра сейчас не слушает
+           клавиатуру: пока меню открыто, нажатия уходят сюда. */
+        background: rgba(0, 0, 0, 0.55);
+
+        /* Появление в два плана.
+
+           Сначала за долю секунды ложится затемнение — это дальний
+           план, фон отходит назад. И только потом из него выходит
+           карточка: подрастает с девяноста процентов до ста
+           и на ходу наводится на резкость. Получается, что она
+           выступает из глубины на передний план, а не просто
+           проявляется на месте.
+
+           Порядок держится задержкой у карточки: без неё оба плана
+           едут одновременно, и никакой глубины не читается — просто
+           два предмета одновременно становятся видимыми.
+
+           Кривая с резким торможением: предмет быстро идёт к зрителю
+           и мягко останавливается. Так двигаются вещи, у которых есть
+           вес.
+
+           Гаснет всё разом и быстрее, чем появляется: уходящее
+           не рассматривают, а медленное исчезновение задерживает
+           возврат в игру. */
+        opacity: 0;
+        transition: opacity 0.1s ease-out;
+      }
+
+      body.shown {
+        opacity: 1;
+        transition: opacity 0.13s ease-out;
+      }
+
+      /* Девяносто процентов и семь пикселей размытия оказались перебором:
+         карточка прыгала и «схлопывалась», как всплывающее окно из
+         старых программ. Меньший ход и лёгкая подача снизу читаются
+         как выход из глубины, а не как рывок. */
+      #card {
+        opacity: 0;
+        transform: translate(-50%, calc(-50% + 10px)) scale(0.97);
+        filter: blur(3px);
+        transition:
+          opacity 0.09s ease-out,
+          transform 0.09s ease-out,
+          filter 0.09s ease-out;
+      }
+
+      body.shown #card {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+        filter: blur(0);
+        transition:
+          opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1) 0.04s,
+          transform 0.26s cubic-bezier(0.16, 1, 0.3, 1) 0.04s,
+          filter 0.16s cubic-bezier(0.16, 1, 0.3, 1) 0.04s;
+      }
+
+      /* Окошко-призрак выходит вместе с карточкой, но без глубины:
+         оно и так стоит там, где стоит, — двигать его при появлении
+         значит показывать неправду о том, где оно окажется. */
+      #ghost {
+        opacity: 0;
+        transition: opacity 0.1s ease-out;
+      }
+
+      body.shown #ghost {
+        opacity: 1;
+        transition: opacity 0.19s ease-out 0.05s;
+      }
+
+      /* Спокойный режим системы: движение и наводку на резкость
+         убираем, само появление оставляем — без него меню просто
+         возникает, и непонятно, оно открылось или экран моргнул. */
+      @media (prefers-reduced-motion: reduce) {
+        #card,
+        body.shown #card {
+          transform: translate(-50%, -50%);
+          filter: none;
+        }
+
+        body,
+        body.shown,
+        #card,
+        body.shown #card,
+        #ghost,
+        body.shown #ghost {
+          transition-duration: 0.09s;
+          transition-delay: 0s;
+        }
+      }
+
+      /* ── Окошко, каким оно будет висеть поверх игры ──────────────
+         Здесь оно не настоящее, а нарисованное: настоящее на время
+         меню спрятано. Так его можно взять мышью и поставить куда
+         угодно — сквозное окно мышью не берётся, в этом и была
+         причина, по которой раньше выбирали из четырёх углов. */
+      /* Размер задаётся числом из скрипта — тем же, по которому
+         главный процесс выставляет настоящее окно. Мерить содержимое
+         нельзя: призрак короче окна, и окошко после закрытия меню
+         прыгало бы на разницу. */
+      #ghost {
+        position: absolute;
+        cursor: grab;
+        border-radius: 12px;
+        outline: 2px dashed rgba(255, 255, 255, 0.25);
+        outline-offset: -2px;
+      }
+
+      #ghost-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: flex-start;
+        padding: 10px;
+        zoom: var(--hud-scale, 1);
+      }
+
+      #ghost.dragging {
+        cursor: grabbing;
+        outline-color: var(--accent);
+      }
+
+      .hud-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px 4px 4px;
+        border-radius: 999px;
+        background: rgba(20, 21, 24, 0.72);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+        max-width: 240px;
+      }
+
+      .hud-row .face {
+        width: 28px;
+        height: 28px;
+        font-size: 12px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        object-fit: cover;
+        border: 2px solid transparent;
+      }
+
+      .hud-row.speaking .face {
+        border-color: var(--online);
+      }
+
+      /* Кружок с буквой вместо аватара — у кого его нет. */
+      .face.stub {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--raised);
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .hud-row span {
+        font-size: 13px;
+        font-weight: 600;
+        color: #b8bcc4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .hud-row.speaking span {
+        color: #fff;
+      }
+
+      /* По центру под окошком, а не от левого края: у правого края
+         экрана подсказка, начинающаяся слева, уезжала за границу. */
+      #ghost-hint {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 11px;
+        color: var(--faint);
+        pointer-events: none;
+      }
+
+      /* ── Само меню ──────────────────────────────────────────────── */
+      #card {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 460px;
+        max-height: 86vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+        overflow: hidden;
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 14px 18px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      header h1 {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--bright);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      header .sub {
+        font-size: 12px;
+        color: var(--faint);
+        margin-left: auto;
+        white-space: nowrap;
+      }
+
+      .scroll {
+        overflow-y: auto;
+        padding: 12px 18px;
+      }
+
+      .scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+      .scroll::-webkit-scrollbar-thumb {
+        background: var(--raised);
+        border-radius: 4px;
+      }
+
+      h2 {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      section + section {
+        margin-top: 18px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      /* ── Человек в разговоре ────────────────────────────────────── */
+      .person {
+        display: grid;
+        grid-template-columns: 32px 1fr auto;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 0;
+      }
+
+      .person .face {
+        width: 32px;
+        height: 32px;
+        font-size: 13px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid transparent;
+        transition: border-color 0.09s linear;
+      }
+
+      .person.speaking .face {
+        border-color: var(--online);
+      }
+
+      .person .who {
+        min-width: 0;
+      }
+
+      .person .name {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .person.speaking .name {
+        color: var(--bright);
+      }
+
+      .person .state {
+        font-size: 11px;
+        color: var(--faint);
+      }
+
+      .person .state.off {
+        color: var(--danger);
+      }
+
+      .person .state.on {
+        color: var(--accent);
+      }
+
+      .volume {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .volume input {
+        width: 108px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      #master {
+        width: 100%;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      #master-value {
+        font-size: 11px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .volume .value {
+        width: 38px;
+        text-align: right;
+        font-size: 11px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Кнопки ─────────────────────────────────────────────────── */
+      .actions {
+        display: flex;
+        gap: 8px;
+        padding: 12px 18px;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--raised);
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 12px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition:
+          background-color 0.1s linear,
+          color 0.1s linear;
+      }
+
+      button:hover {
+        background: var(--hover);
+        color: var(--bright);
+      }
+
+      button.wide {
+        flex: 1;
+        /* Подпись в одну строку: «Выключить микрофон» переносилось
+           на две, и ряд кнопок становился в полтора раза выше. */
+        white-space: nowrap;
+      }
+
+      button.on {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      button.on:hover {
+        background: var(--accent-hover);
+      }
+
+      button.off {
+        background: var(--danger);
+        color: #fff;
+      }
+
+      button.off:hover {
+        filter: brightness(1.1);
+      }
+
+      button.quiet {
+        background: transparent;
+        color: var(--muted);
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+
+      button.quiet:hover {
+        background: var(--raised);
+        color: var(--bright);
+      }
+
+      button.quiet.picked {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      button svg {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        fill: currentColor;
+      }
+
+      .channels {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .channel {
+        justify-content: flex-start;
+        background: transparent;
+        padding: 7px 10px;
+        width: 100%;
+      }
+
+      .channel:hover {
+        background: var(--raised);
+      }
+
+      .channel.current {
+        background: var(--raised);
+        color: var(--bright);
+        cursor: default;
+      }
+
+      .channel .count {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--faint);
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .row .label {
+        font-size: 12px;
+        color: var(--muted);
+        margin-right: auto;
+      }
+
+      footer {
+        padding: 8px 18px 12px;
+        font-size: 11px;
+        color: var(--faint);
+        text-align: center;
+        background: var(--panel);
+      }
+
+      kbd {
+        font: inherit;
+        background: var(--raised);
+        border-radius: 4px;
+        padding: 1px 5px;
+        color: var(--muted);
+      }
+
+      .empty {
+        font-size: 13px;
+        color: var(--faint);
+        padding: 4px 0;
+      }
+
+      /* ── Выбор того, что показать ────────────────────────────────
+         Второй экран той же карточки, а не отдельное окно: показ
+         начинают из игры, и уводить человека куда-то ещё нельзя —
+         ради этого всё и затевалось. */
+      /* Оба экрана — колонки во всю карточку: прокручивается только
+         середина, шапка и кнопки стоят. */
+      #main,
+      #pick {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        flex: 1;
+      }
+
+      #pick,
+      body.picking #main {
+        display: none;
+      }
+
+      body.picking #pick {
+        display: flex;
+      }
+
+      .sources {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        padding: 12px 18px;
+        overflow-y: auto;
+      }
+
+      .source {
+        display: block;
+        padding: 0;
+        overflow: hidden;
+        background: var(--raised);
+        border-radius: 8px;
+        text-align: left;
+      }
+
+      .source img,
+      .source .shot {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        background: #000;
+      }
+
+      .source .shot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--panel);
+        color: var(--faint);
+        font-size: 11px;
+      }
+
+      .source .cap {
+        display: block;
+        padding: 6px 8px;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .source:hover {
+        background: var(--accent);
+      }
+
+      .source:hover .cap {
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ghost">
+      <div id="ghost-list"></div>
+      <div id="ghost-hint">перетащите — окошко встанет сюда</div>
+    </div>
+
+    <div id="card">
+      <!-- Выбор того, что показать. Второй экран той же карточки. -->
+      <div id="pick">
+        <header>
+          <h1>Что показать</h1>
+          <span class="sub" id="pick-count"></span>
+        </header>
+        <div class="sources" id="sources"></div>
+        <div class="actions">
+          <button class="wide" id="pick-cancel">Отмена</button>
+        </div>
+      </div>
+
+      <div id="main">
+        <header>
+          <h1 id="title">Разговор</h1>
+          <span class="sub" id="subtitle"></span>
+        </header>
+
+        <div class="scroll">
+        <section>
+          <div class="row" style="margin-bottom: 8px">
+            <h2 style="margin: 0">Общая громкость</h2>
+            <span class="value" id="master-value"></span>
+          </div>
+          <input type="range" id="master" min="0" max="2" step="0.05" aria-label="Общая громкость" />
+        </section>
+
+        <section>
+          <h2>В разговоре</h2>
+          <div id="people"></div>
+        </section>
+
+        <section id="channels-section">
+          <h2>Перейти в канал</h2>
+          <div class="channels" id="channels"></div>
+        </section>
+
+        <section>
+          <h2>Окошко поверх игры</h2>
+          <div class="row">
+            <span class="label">Размер</span>
+            <button class="quiet" data-scale="0.8">мелкий</button>
+            <button class="quiet" data-scale="1">обычный</button>
+            <button class="quiet" data-scale="1.25">крупный</button>
+          </div>
+          <div class="row" style="margin-top: 8px">
+            <span class="label">Показывать</span>
+            <button class="quiet" data-hud="always">всегда</button>
+            <button class="quiet" data-hud="game">в игре</button>
+            <button class="quiet" data-hud="never">никогда</button>
+          </div>
+        </section>
+      </div>
+
+        <div class="actions">
+          <button class="wide" id="mic"></button>
+          <button class="wide" id="sound"></button>
+          <button id="screen" title="Показать экран"></button>
+          <button id="leave" title="Выйти из разговора"></button>
+        </div>
+      </div>
+
+      <footer>
+        <span id="hint-menu"><kbd id="key">Shift+F1</kbd> или <kbd>Esc</kbd> — закрыть</span>
+        <span id="hint-pick" hidden><kbd>Esc</kbd> — отмена</span>
+      </footer>
+    </div>
+
+    <script>
+      /** Мост спрашиваем в момент вызова, а не запоминаем при загрузке:
+       *  так страницу можно прогнать и без оболочки, подставив свой,
+       *  а заодно не зависим от того, успел ли preload отработать
+       *  раньше скрипта. */
+      const send = (action) => window.overlay?.action?.(action);
+
+      const ICON = {
+        mic: '<svg viewBox="0 0 24 24"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5V5a3.5 3.5 0 1 0-7 0v6.5A3.5 3.5 0 0 0 12 15Zm6.5-3.5a6.5 6.5 0 0 1-5.5 6.4V21h-2v-3.1a6.5 6.5 0 0 1-5.5-6.4h1.8a4.7 4.7 0 0 0 9.4 0h1.8Z"/></svg>',
+        micOff:
+          '<svg viewBox="0 0 24 24"><path d="M3.7 2.3 2.3 3.7l6 6v1.8a3.7 3.7 0 0 0 5.6 3.2l1.5 1.5A5.6 5.6 0 0 1 6.4 11.5H4.6a7.4 7.4 0 0 0 6.5 7.3V21h1.8v-2.2c1.1-.1 2.1-.5 3-1l4.4 4.4 1.4-1.4L3.7 2.3Zm12 9.4V5a3.7 3.7 0 0 0-7.3-.8l7.3 7.5Z"/></svg>',
+        sound:
+          '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4Zm-2.5 7.9a8 8 0 0 0 0-15.8v1.9a6.1 6.1 0 0 1 0 12v1.9Z"/></svg>',
+        soundOff:
+          '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4Zm17.3-1.3-1.4-1.4L17 9.2l-2.9-2.9v2.6l1.5 1.5L17 12l-2.9 2.9v2.6l2.9-2.9 2.9 2.9 1.4-1.4-2.9-2.9 2.9-3.5Z"/></svg>',
+        screen:
+          '<svg viewBox="0 0 24 24"><path d="M3 4h18v12H3V4Zm0 14h18v2H3v-2Zm2-12v8h14V6H5Z"/></svg>',
+        screenOff:
+          '<svg viewBox="0 0 24 24"><path d="M3 4h18v12H3V4Zm2 2v8h14V6H5Zm0 12h14v2H5v-2Zm4.5-9.5 5 5-1 1-5-5 1-1Zm4 0 1 1-5 5-1-1 5-5Z"/></svg>',
+        leave:
+          '<svg viewBox="0 0 24 24"><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v-2H5V6h5V4Zm7.6 4.6-1.4 1.4 1.5 1.5H9v2h8.7l-1.5 1.5 1.4 1.4L21.5 12l-3.9-3.4Z"/></svg>',
+      };
+
+      /** Что показываем прямо сейчас. Нужно и для перерисовки после
+       *  своих же нажатий: ответ придёт следующим состоянием, а кнопка
+       *  должна отозваться мгновенно. */
+      let state = { people: [], channels: [], pos: { x: 0, y: 0 }, scale: 1 };
+      let dragging = false;
+
+      const $ = (id) => document.getElementById(id);
+
+      /** Аватар или кружок с буквой.
+       *
+       *  Картинка приезжает готовой, данными. Но приехать она может
+       *  и пустой — например, у человека её просто нет. Пустой src
+       *  браузер рисует значком битой картинки, что выглядит как
+       *  поломка приложения, а не как «аватар не задан». */
+      function avatarNode(person, className) {
+        if (person.avatar) {
+          const img = document.createElement("img");
+          img.className = className;
+          img.src = person.avatar;
+          img.alt = "";
+          return img;
+        }
+        const stub = document.createElement("div");
+        stub.className = `${className} stub`;
+        stub.textContent = (person.name || "?").trim().charAt(0).toUpperCase();
+        return stub;
+      }
+
+      /* ── Окошко-призрак ─────────────────────────────────────────── */
+
+      const ghost = $("ghost");
+
+      /** Отступ от края и размер окошка при обычном масштабе.
+       *  Те же числа, что в main.cjs (OVERLAY_GAP и OVERLAY_BASE):
+       *  призрак должен стоять ровно там же и быть ровно таким же,
+       *  иначе окошко после закрытия меню сдвинется. */
+      const GAP = 12;
+      const BASE = { width: 260, height: 264 };
+
+      const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+
+      /** Размер призрака — числом, а не по содержимому. */
+      function ghostSize() {
+        const scale = Number(state.scale) || 1;
+        return {
+          width: Math.round(BASE.width * scale),
+          height: Math.round(BASE.height * scale),
+        };
+      }
+
+      function freeSpace() {
+        const size = ghostSize();
+        return {
+          x: Math.max(1, innerWidth - size.width - GAP * 2),
+          y: Math.max(1, innerHeight - size.height - GAP * 2),
+        };
+      }
+
+      function placeGhost() {
+        const size = ghostSize();
+        const free = freeSpace();
+        ghost.style.width = `${size.width}px`;
+        ghost.style.height = `${size.height}px`;
+        ghost.style.left = `${GAP + free.x * clamp01(state.pos.x)}px`;
+        ghost.style.top = `${GAP + free.y * clamp01(state.pos.y)}px`;
+      }
+
+      ghost.addEventListener("pointerdown", (event) => {
+        if (state.people.length === 0) return;
+        dragging = true;
+        ghost.classList.add("dragging");
+        ghost.setPointerCapture(event.pointerId);
+        const box = ghost.getBoundingClientRect();
+        ghost._grab = { x: event.clientX - box.left, y: event.clientY - box.top };
+        event.preventDefault();
+      });
+
+      ghost.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        const free = freeSpace();
+        state.pos = {
+          x: clamp01((event.clientX - ghost._grab.x - GAP) / free.x),
+          y: clamp01((event.clientY - ghost._grab.y - GAP) / free.y),
+        };
+        placeGhost();
+      });
+
+      function endDrag(event) {
+        if (!dragging) return;
+        dragging = false;
+        ghost.classList.remove("dragging");
+        if (event) ghost.releasePointerCapture(event.pointerId);
+        // Сохраняем только на отпускании: слать по событию на каждый
+        // пиксель значит писать в настройки шестьдесят раз в секунду.
+        send({ type: "move", x: state.pos.x, y: state.pos.y });
+      }
+
+      ghost.addEventListener("pointerup", endDrag);
+      ghost.addEventListener("pointercancel", endDrag);
+
+      /* ── Отрисовка ──────────────────────────────────────────────── */
+
+      function renderGhost() {
+        // Строки призрака — те же, что в настоящем окошке.
+        const list = $("ghost-list");
+        list.textContent = "";
+        for (const person of state.people) {
+          const row = document.createElement("div");
+          row.className = `hud-row${person.speaking ? " speaking" : ""}`;
+          const name = document.createElement("span");
+          name.textContent = person.name;
+          row.append(avatarNode(person, "face"), name);
+          list.append(row);
+        }
+        document.documentElement.style.setProperty("--hud-scale", Number(state.scale) || 1);
+        placeGhost();
+      }
+
+      function renderPeople() {
+        const box = $("people");
+        box.textContent = "";
+
+        if (state.people.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "empty";
+          empty.textContent = "Пока никого";
+          box.append(empty);
+          return;
+        }
+
+        for (const person of state.people) {
+          const row = document.createElement("div");
+          row.className = `person${person.speaking ? " speaking" : ""}`;
+
+          const who = document.createElement("div");
+          who.className = "who";
+          const name = document.createElement("div");
+          name.className = "name";
+          name.textContent = person.me ? `${person.name} — это вы` : person.name;
+          who.append(name);
+
+          // Одна строка состояния, а не четыре значка: важное здесь
+          // всегда одно. Порядок — по тому, что мешает разговору
+          // сильнее.
+          const status = document.createElement("div");
+          if (person.muted) {
+            status.className = "state off";
+            status.textContent = "микрофон выключен";
+          } else if (person.silenced) {
+            status.className = "state off";
+            status.textContent = "заглушён для вас";
+          } else if (person.screen) {
+            status.className = "state on";
+            status.textContent = person.speaking ? "говорит · показывает экран" : "показывает экран";
+          } else {
+            status.className = "state";
+            status.textContent = person.speaking ? "говорит" : "";
+          }
+          who.append(status);
+
+          row.append(avatarNode(person, "face"), who);
+
+          // Себе громкость не крутят: свой голос в свои же наушники
+          // не идёт, ползунок ничего бы не делал.
+          if (!person.me) {
+            const volume = document.createElement("div");
+            volume.className = "volume";
+
+            const slider = document.createElement("input");
+            slider.type = "range";
+            slider.min = "0";
+            slider.max = "2";
+            slider.step = "0.05";
+            slider.value = String(person.volume ?? 1);
+            slider.title = `Громкость: ${person.name}`;
+
+            const value = document.createElement("span");
+            value.className = "value";
+            const show = () => {
+              value.textContent = person.silenced
+                ? "тихо"
+                : `${Math.round(Number(slider.value) * 100)}%`;
+            };
+            show();
+
+            slider.addEventListener("input", show);
+            slider.addEventListener("change", () =>
+              send({ type: "volume", userId: person.id, value: Number(slider.value) }),
+            );
+
+            const mute = document.createElement("button");
+            mute.className = `quiet${person.silenced ? " picked" : ""}`;
+            mute.textContent = person.silenced ? "вернуть" : "заглушить";
+            mute.addEventListener("click", () => send({ type: "silence", userId: person.id }));
+
+            volume.append(slider, value, mute);
+            row.append(volume);
+          }
+
+          box.append(row);
+        }
+      }
+
+      function renderChannels() {
+        const box = $("channels");
+        box.textContent = "";
+        // Один канал — переходить некуда, и раздел только занимает место.
+        $("channels-section").hidden = state.channels.length < 2;
+
+        for (const channel of state.channels) {
+          const button = document.createElement("button");
+          button.className = `channel${channel.current ? " current" : ""}`;
+          button.disabled = channel.current;
+
+          const name = document.createElement("span");
+          name.textContent = channel.name;
+          const count = document.createElement("span");
+          count.className = "count";
+          count.textContent = channel.count > 0 ? `${channel.count}` : "пусто";
+
+          button.append(name, count);
+          button.addEventListener("click", () => send({ type: "join", channelId: channel.id }));
+          box.append(button);
+        }
+      }
+
+      function renderButtons() {
+        // Подпись называет предмет, а не действие: «Микрофон».
+        // Что с ним сейчас, говорит красный фон и перечёркнутый значок,
+        // а что случится по нажатию — подсказка при наведении.
+        // Глагол в подписи («Выключить микрофон») занимал две строки
+        // и всё равно требовал прочтения, чтобы понять текущее
+        // состояние.
+        const mic = $("mic");
+        mic.className = `wide${state.muted ? " off" : ""}`;
+        mic.title = state.muted ? "Включить микрофон" : "Выключить микрофон";
+        mic.innerHTML = `${state.muted ? ICON.micOff : ICON.mic}<span>Микрофон</span>`;
+
+        const sound = $("sound");
+        sound.className = `wide${state.deafened ? " off" : ""}`;
+        sound.title = state.deafened ? "Включить звук" : "Выключить звук";
+        sound.innerHTML = `${state.deafened ? ICON.soundOff : ICON.sound}<span>Звук</span>`;
+
+        // Кнопка есть всегда и работает в обе стороны. Раньше она
+        // умела только прекратить показ и пряталась, когда показа
+        // нет, — снаружи это выглядело как неработающая кнопка,
+        // потому что её просто не было видно.
+        const share = $("screen");
+        share.className = state.sharing ? "on" : "";
+        share.title = state.sharing ? "Прекратить показ экрана" : "Показать экран";
+        share.innerHTML = state.sharing ? ICON.screenOff : ICON.screen;
+
+        $("leave").className = "off";
+        $("leave").innerHTML = ICON.leave;
+
+        $("title").textContent = state.channelName || "Разговор";
+        $("subtitle").textContent =
+          state.people.length > 0 ? `в разговоре: ${state.people.length}` : "";
+
+        for (const button of document.querySelectorAll("[data-scale]")) {
+          button.classList.toggle("picked", Number(button.dataset.scale) === Number(state.scale));
+        }
+
+        for (const button of document.querySelectorAll("[data-hud]")) {
+          button.classList.toggle("picked", button.dataset.hud === state.hudMode);
+        }
+        // Призрак прячем только на «никогда»: в режиме «в игре» окошка
+        // сейчас может не быть на экране, но поставить его куда надо
+        // человек хочет именно сейчас, а не запустив игру.
+        ghost.hidden = state.hudMode === "never";
+
+        $("key").textContent = state.key || "Shift+F1";
+
+        // Ползунок не трогаем, пока его тащат: приехавшее состояние
+        // выдёргивало бы его из-под пальца.
+        const master = $("master");
+        if (document.activeElement !== master) master.value = String(state.master ?? 1);
+        $("master-value").textContent = `${Math.round(Number(master.value) * 100)}%`;
+      }
+
+      function render() {
+        renderButtons();
+        renderPeople();
+        renderChannels();
+        if (state.hudMode !== "never") renderGhost();
+      }
+
+      /* ── Нажатия ────────────────────────────────────────────────── */
+
+      $("mic").addEventListener("click", () => {
+        state.muted = !state.muted;
+        renderButtons();
+        send({ type: "mute" });
+      });
+
+      $("sound").addEventListener("click", () => {
+        state.deafened = !state.deafened;
+        renderButtons();
+        send({ type: "deafen" });
+      });
+
+      // Начать показ — список источников приедет сюда же, вторым
+      // экраном этой карточки. Уводить человека в мессенджер ради
+      // выбора нельзя: он сейчас в игре, ради этого оверлей и есть.
+      $("screen").addEventListener("click", () => send({ type: "screen" }));
+
+      $("master").addEventListener("input", () => {
+        $("master-value").textContent = `${Math.round(Number($("master").value) * 100)}%`;
+      });
+      $("master").addEventListener("change", () =>
+        send({ type: "master", value: Number($("master").value) }),
+      );
+      $("leave").addEventListener("click", () => send({ type: "leave" }));
+
+      for (const button of document.querySelectorAll("[data-scale]")) {
+        button.addEventListener("click", () => {
+          state.scale = Number(button.dataset.scale);
+          renderButtons();
+          renderGhost();
+          send({ type: "scale", value: state.scale });
+        });
+      }
+
+      for (const button of document.querySelectorAll("[data-hud]")) {
+        button.addEventListener("click", () => {
+          state.hudMode = button.dataset.hud;
+          renderButtons();
+          if (state.hudMode !== "never") renderGhost();
+          send({ type: "hudMode", mode: state.hudMode });
+        });
+      }
+
+      /* ── Выбор того, что показать ───────────────────────────────── */
+
+      /** Открыт ли сейчас выбор источника. Пока открыт, меню не должно
+       *  закрываться ни по щелчку мимо, ни по Esc с концами: сначала
+       *  надо ответить на заданный вопрос. */
+      let picking = false;
+
+      /** Подсказка внизу называет то действие, которое сейчас
+       *  осмысленно: в выборе Esc отменяет выбор, а не закрывает меню. */
+      function hint() {
+        $("hint-menu").hidden = picking;
+        $("hint-pick").hidden = !picking;
+      }
+
+      /** Заглушка вместо миниатюры, которой нет. */
+      function blank() {
+        const stub = document.createElement("div");
+        stub.className = "shot";
+        stub.textContent = "без снимка";
+        return stub;
+      }
+
+      function showSources(sources) {
+        const list = Array.isArray(sources) ? sources : [];
+        picking = true;
+        document.body.classList.add("picking");
+        hint();
+
+        const box = $("sources");
+        box.textContent = "";
+        $("pick-count").textContent = list.length > 0 ? `${list.length}` : "";
+
+        // Экраны первыми: их один-два, и чаще показывают именно их.
+        const order = [...list].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "screen" ? -1 : 1));
+
+        for (const source of order) {
+          const button = document.createElement("button");
+          button.className = "source";
+          button.title = source.name;
+
+          const cap = document.createElement("span");
+          cap.className = "cap";
+          cap.textContent = source.name;
+
+          // Миниатюра бывает пустой: Windows отказывается снимать
+          // свёрнутые и защищённые окна. Пустой src рисуется значком
+          // битой картинки — выглядит как поломка, хотя источник
+          // рабочий и выбрать его можно.
+          if (source.thumbnail) {
+            const img = document.createElement("img");
+            img.src = source.thumbnail;
+            img.alt = "";
+            img.addEventListener("error", () => img.replaceWith(blank()));
+            button.append(img);
+          } else {
+            button.append(blank());
+          }
+
+          button.append(cap);
+          button.addEventListener("click", () => pickDone(source.id));
+          box.append(button);
+        }
+
+        if (list.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "empty";
+          empty.style.padding = "12px 18px";
+          empty.textContent = "Показывать нечего";
+          box.append(empty);
+        }
+      }
+
+      function pickDone(id) {
+        if (!picking) return;
+        picking = false;
+        document.body.classList.remove("picking");
+        hint();
+        window.overlay?.screenPicked?.(id ?? null);
+      }
+
+      $("pick-cancel").addEventListener("click", () => pickDone(null));
+      window.overlay?.onScreenPick?.(showSources);
+
+      /** Закрыться. Гасим страницу сразу, не дожидаясь оболочки:
+       *  так нажатие отзывается мгновенно, а окно прячется следом. */
+      function close() {
+        // Открыт выбор — сначала отвечаем на него отказом, иначе
+        // оболочка останется ждать ответа, которого не будет,
+        // и следующий показ уже не начнётся.
+        if (picking) {
+          pickDone(null);
+          return;
+        }
+        document.body.classList.remove("shown");
+        send({ type: "close" });
+      }
+
+      // Щелчок по любому месту закрывает меню — кроме того, на что
+      // можно нажать: кнопок, ползунков и самого окошка, которое
+      // перетаскивают. Раньше закрывал только щелчок мимо карточки,
+      // и попасть по ней, желая закрыть, было легче лёгкого.
+      //
+      // На перехвате (третий аргумент true), а не на всплытии.
+      // Разница решающая: кнопка микрофона в своём обработчике
+      // перерисовывает саму себя, и нажатый значок к моменту всплытия
+      // уже выброшен из страницы. У выброшенного узла нет предков,
+      // поиск кнопки над ним не находил ничего — и меню считало, что
+      // нажали мимо, и закрывалось после каждого действия.
+      // На перехвате мы смотрим раньше, чем что-либо успело
+      // перерисоваться.
+      document.body.addEventListener(
+        "click",
+        (event) => {
+          if (dragging) return;
+          if (event.target.closest("button, input, select, label, #ghost")) return;
+          close();
+        },
+        true,
+      );
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") close();
+      });
+
+      // Оболочка сама решила показать или спрятать — по клавише,
+      // по уходу в другое окно, по концу разговора.
+      window.overlay?.onToggle?.((open) => {
+        document.body.classList.toggle("shown", open);
+        if (open) placeGhost();
+        // Спрятали посреди выбора — отвечаем отказом, иначе оболочка
+        // останется ждать ответа навсегда.
+        else if (picking) pickDone(null);
+      });
+
+      addEventListener("resize", () => {
+        if (state.hudMode !== "never") placeGhost();
+      });
+
+      // Наружу — чтобы страницу можно было прогнать без оболочки.
+      window.__render = (next) => {
+        state = { scale: 1, hudMode: "always", people: [], channels: [], ...(next ?? {}) };
+        // Положение может приехать пустым из старого хранилища —
+        // а от него считается вся раскладка призрака.
+        if (!state.pos || typeof state.pos.x !== "number") state.pos = { x: 0, y: 0 };
+        render();
+      };
+      window.overlay?.onState?.(window.__render);
+      // Без оболочки страницу открывают только затем, чтобы её
+      // проверить, — показываем сразу, ждать «открылось» неоткуда.
+      if (!window.overlay) document.body.classList.add("shown");
+      render();
+    </script>
+  </body>
+</html>
