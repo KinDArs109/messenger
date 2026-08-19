@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { USER_STATUSES } from "../constants.js";
+import { USER_STATUSES, type ChosenStatus } from "../constants.js";
 
 /** ULID: 26 символов кодировки Кроуфорда. Сортируется по времени
  *  как строка, поэтому курсорная пагинация работает без отдельного
@@ -7,6 +7,16 @@ import { USER_STATUSES } from "../constants.js";
 export const ulidSchema = z
   .string()
   .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, "Некорректный идентификатор");
+
+/** Ссылка на нашу же загрузку — аватар профиля или значок сервера.
+ *
+ *  Проверяем форму, а не просто «строка»: сюда приходит то, что
+ *  прислал браузер, и без проверки в поле картинки оказался бы
+ *  чужой адрес. Тогда каждый, кто видит участника, незаметно для
+ *  себя ходил бы на чужой сервер и сообщал ему свой IP. */
+export const uploadUrlSchema = z
+  .string()
+  .regex(/^\/uploads\/[0-9A-HJKMNP-TV-Z]{26}\.webp$/, "Некорректная ссылка на картинку");
 
 export const publicUserSchema = z.object({
   id: ulidSchema,
@@ -24,6 +34,11 @@ export type PublicUser = z.infer<typeof publicUserSchema>;
 export type PrivateUser = PublicUser & {
   email: string;
   emailVerified: boolean;
+  /** Что человек выбрал о себе сам — включая «невидимый», которого
+   *  в публичном статусе нет и быть не может. Приходит только ему:
+   *  выбор нужен, чтобы в меню стояла галочка там, где он её
+   *  поставил, и переживал перезагрузку страницы. */
+  chosenStatus: ChosenStatus;
 };
 
 /** Единый формат ошибки. Клиент всегда получает одну и ту же форму,

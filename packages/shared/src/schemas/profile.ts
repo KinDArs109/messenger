@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LIMITS } from "../constants.js";
+import { uploadUrlSchema } from "./common.js";
 
 /** Правка профиля.
  *
@@ -9,13 +10,21 @@ import { LIMITS } from "../constants.js";
  *  Смена логина рвала бы всё это разом: старые упоминания указывали бы
  *  в пустоту, а освободившееся имя мог бы занять кто угодно и получить
  *  чужие уведомления. */
-export const updateProfileSchema = z.object({
-  displayName: z
-    .string()
-    .trim()
-    .min(LIMITS.displayName.min, "Укажите отображаемое имя")
-    .max(LIMITS.displayName.max, `Максимум ${LIMITS.displayName.max} символов`),
-});
+export const updateProfileSchema = z
+  .object({
+    displayName: z
+      .string()
+      .trim()
+      .min(LIMITS.displayName.min, "Укажите отображаемое имя")
+      .max(LIMITS.displayName.max, `Максимум ${LIMITS.displayName.max} символов`)
+      .optional(),
+    // null — убрать аватар и вернуться к букве на цветном кружке.
+    avatarUrl: uploadUrlSchema.nullable().optional(),
+  })
+  .refine((v) => v.displayName !== undefined || v.avatarUrl !== undefined, {
+    message: "Менять нечего",
+    path: ["displayName"],
+  });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 /** Одноразовые коды: подключение и состояние. */
@@ -60,6 +69,9 @@ export const emailCodeSchema = z.object({
 export interface SessionDto {
   id: string;
   userAgent: string | null;
+  /** Чем зашли: «app-desktop», «app-mobile» или «browser».
+   *  null — вход был до того, как клиент начал об этом сообщать. */
+  client?: string | null;
   createdAt: string;
   expiresAt: string;
   /** Та сессия, из которой пришёл запрос. Её нельзя закрыть кнопкой

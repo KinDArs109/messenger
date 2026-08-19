@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LIMITS } from "../constants.js";
-import { ulidSchema } from "./common.js";
+import { ulidSchema, uploadUrlSchema } from "./common.js";
 
 export const sendMessageSchema = z
   .object({
@@ -36,6 +36,30 @@ export const createServerSchema = z.object({
     .min(LIMITS.serverName.min, "Слишком короткое название")
     .max(LIMITS.serverName.max, `Максимум ${LIMITS.serverName.max} символов`),
 });
+
+/** Правка сервера. Оба поля необязательны и меняются порознь:
+ *  переименование и смена значка — разные действия в разных местах
+ *  окна, и присылать одно вместе с другим только чтобы «ничего не
+ *  затереть» — верный способ однажды затереть. */
+export const updateServerSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(LIMITS.serverName.min, "Слишком короткое название")
+      .max(LIMITS.serverName.max, `Максимум ${LIMITS.serverName.max} символов`)
+      .optional(),
+    // null — убрать значок и вернуться к буквам.
+    iconUrl: uploadUrlSchema.nullable().optional(),
+    // Баннер над списком каналов. Открывается со второго уровня буста —
+    // проверяет это сервер, схема лишь следит за формой ссылки.
+    bannerUrl: uploadUrlSchema.nullable().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.iconUrl !== undefined, {
+    message: "Менять нечего",
+    path: ["name"],
+  });
+export type UpdateServerInput = z.infer<typeof updateServerSchema>;
 
 export const createChannelSchema = z.object({
   name: z
