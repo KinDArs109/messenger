@@ -37,9 +37,37 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * Чем человек зашёл: приложением или браузером.
+ *
+ * Нужно для списка входов в настройках — там иначе всё выглядит
+ * одинаково. Из user-agent это не выводится: приложение на Android
+ * показывает ровно тот же user-agent, что и вкладка Chrome, а на
+ * компьютере оболочка отличается одним словом посреди строки.
+ * Проще сказать прямо, чем гадать по строке.
+ *
+ * window.claude здесь ни при чём: мост оболочки называется иначе —
+ * см. lib/desktop.ts. Обращаемся к нему напрямую, без импорта,
+ * чтобы не тянуть в этот файл половину приложения.
+ */
+function clientKind(): string {
+  if (typeof window === "undefined") return "browser";
+  if ("messenger" in window) return "app-desktop";
+
+  const standalone =
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    // Safari на iPhone про display-mode не знает и отвечает по-своему.
+    (navigator as unknown as { standalone?: boolean }).standalone === true;
+
+  return standalone ? "app-mobile" : "browser";
+}
+
 async function refreshSession(): Promise<boolean> {
   try {
-    const res = await fetch("/api/auth/refresh", { method: "POST" });
+    const res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "X-Client": clientKind() },
+    });
     if (!res.ok) return false;
     const data = (await res.json()) as { accessToken: string };
     accessToken = data.accessToken;
@@ -70,6 +98,7 @@ async function request<T>(path: string, options: Options = {}, retry = true): Pr
       headers: {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        "X-Client": clientKind(),
       },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
     });

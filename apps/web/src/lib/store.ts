@@ -2,12 +2,14 @@ import { create } from "zustand";
 import type {
   DmChannelDto,
   FriendshipDto,
+  ChosenStatus,
   MemberDto,
   MessageDto,
   PrivateUser,
   PublicUser,
   ReadStateDto,
   ServerDto,
+  UserStatus,
 } from "@messenger/shared";
 
 interface State {
@@ -15,6 +17,46 @@ interface State {
   servers: ServerDto[];
   members: MemberDto[];
   dms: DmChannelDto[];
+  /**
+   * Кто сейчас в сети. Одно место на всё приложение.
+   *
+   * Раньше статус лежал внутри каждого списка отдельно — в составе
+   * сервера, в личных переписках, в друзьях и в своей же карточке, —
+   * а событие «сменился статус» правило только состав сервера.
+   * Остальные списки так и показывали то, что приехало при загрузке:
+   * друг выходил из сети, а в переписках оставался зелёным. Свой
+   * кружок не загорался никогда: карточка приезжает до подключения
+   * сокета, то есть в тот момент, когда мы и правда ещё не в сети.
+   *
+   * Здесь же — то, что известно прямо сейчас. Списки остаются такими,
+   * какими пришли, и это правильно: они хранят человека, а не его
+   * текущее состояние.
+   */
+  presence: Map<string, UserStatus>;
+  setPresence: (userId: string, status: UserStatus) => void;
+  /** Что мы выбрали о себе сами — вместе с «невидимым», которого
+   *  в присутствии выше нет: наружу он уходит как «не в сети».
+   *  Отдельно от me.chosenStatus, потому что меняется чаще, чем
+   *  весь профиль, и приезжает своим событием. */
+  myStatus: ChosenStatus;
+  setMyStatus: (status: ChosenStatus) => void;
+  /** Кто во что играет. Рядом с состоянием и по той же причине:
+   *  это то, что известно прямо сейчас, а не свойство человека. */
+  games: Map<string, string>;
+  setGame: (userId: string, game: string | null) => void;
+  setGames: (playing: { userId: string; game: string }[]) => void;
+  /** Звонок, который сейчас идёт: входящий или исходящий. Живёт
+   *  в общем хранилище, а не в компоненте, потому что окно звонка
+   *  рисуется поверх всего, а ответить надо из любого места. */
+  call: {
+    channelId: string;
+    peer: PublicUser | null;
+    incoming: boolean;
+    /** Чем кончилось, если кончилось. Показывается пару секунд. */
+    state?: "declined" | "cancelled" | "missed" | "busy" | "offline" | "accepted";
+    error?: string;
+  } | null;
+  setCall: (call: State["call"]) => void;
   /** null означает «личные сообщения», а не «ничего не выбрано»:
    *  так пространство ЛС становится обычным разделом рейла, а не
    *  третьим состоянием, которое надо всюду проверять отдельно. */
@@ -27,14 +69,6 @@ interface State {
 
   connected: boolean;
   typing: Map<string, number>;
-  membersOpen: boolean;
-  toggleMembers: () => void;
-
-  /** Какой список показывает левая панель: каналы сервера или ЛС.
-   *  Раньше это выводилось из serverId, и попасть в переписку можно
-   *  было, только выйдя из сервера. */
-  sidebarTab: "channels" | "dms";
-  setSidebarTab: (tab: State["sidebarTab"]) => void;
 
   friendships: FriendshipDto[];
   friendsLoaded: boolean;
@@ -53,24 +87,99 @@ interface State {
   /** Кто в каких голосовых каналах. Держим по всем каналам, а не
    *  только по своему: список говорящих виден в сайдбаре и до входа,
    *  иначе нельзя понять, куда идти. */
-  voiceMembers: Map<string, Map<string, { muted: boolean; speaking: boolean }>>;
+  voiceMembers: Map<
+    string,
+    Map<
+      string,
+      { muted: boolean; deafened: boolean; speaking: boolean; sharing: boolean; video: boolean }
+    >
+  >;
+  /** Чужие экраны, которые сейчас показывают: кто → его картинка.
+   *  Сами потоки, а не признак «показывает»: их надо отдать в <video>,
+   *  и хранить их больше негде. */
+  voiceScreens: Map<string, MediaStream>;
+  /** Чей показ мы согласились смотреть. null — ничей.
+   *
+   *  Раньше чужой экран открывался сам, стоило его включить: человек
+   *  сидел в разговоре, а ему без спроса разворачивали чужой рабочий
+   *  стол. Теперь показ ждёт согласия — как в дискорде. */
+  watchingScreen: string | null;
+  setWatchingScreen: (userId: string | null) => void;
+  /** То же самое для камер. Отдельно от экранов, потому что показывают
+   *  их в разных местах: экран — большим полем на весь канал, камеру —
+   *  в плитке самого человека, вместо аватара. */
+  voiceVideos: Map<string, MediaStream>;
+  /** Показываем ли экран мы сами. */
+  voiceSharing: boolean;
+  /** Включена ли наша камера. */
+  voiceVideoOn: boolean;
   voiceMuted: boolean;
+  /** Отключён ли звук целиком. Заглушает всех и заодно себя: слышать
+   *  не слышишь, значит и говорить не о чем — так же в дискорде. */
+  voiceDeafened: boolean;
+  /** Микрофон выключен не человеком, а вместе со звуком.
+   *
+   *  Нужно, чтобы вернуть его при включении звука обратно. Без этого
+   *  выходило однобоко: отключаешь звук — микрофон гаснет сам, включаешь
+   *  обратно — а он так и остался выключенным, и человек говорит
+   *  в пустоту, пока ему не скажут.
+   *
+   *  Вернуть безусловно нельзя: тот, кто выключил микрофон сам ещё
+   *  до этого, не просил его включать. Поэтому и помним, чьё это было
+   *  решение. Своё решение человек может переменить в любой момент —
+   *  нажал на микрофон, и признак снимается. */
+  voiceMutedByDeafen: boolean;
+  setVoiceMutedByDeafen: (value: boolean) => void;
   voiceConnecting: boolean;
+  /** Когда вошли в разговор, для счётчика времени. null — не в нём. */
+  voiceJoinedAt: number | null;
+  /** Задержка до самого далёкого собеседника, миллисекунды.
+   *  null — мерить не по чему: в канале никого либо связь оборвалась. */
+  voicePing: number | null;
+  /** Пинг измерен до сервера, а не до собеседника: мы одни в канале.
+   *  Различать обязательно — это разные числа про разные вещи. */
+  voicePingToServer: boolean;
+  /** Разговор идёт через наш ретранслятор, а не напрямую. Показываем
+   *  человеку: «через сервер» — это обещание, и оно должно быть
+   *  проверяемым, а не написанным в настройках. */
+  voiceViaRelay: boolean;
 
+  /** Заодно заводит и сбрасывает счётчик времени: держать его
+   *  отдельным действием — значит однажды забыть одно из двух. */
   setVoiceChannel: (channelId: string | null) => void;
+  setVoicePing: (ping: number | null, toServer?: boolean, viaRelay?: boolean) => void;
+  /** Своя демонстрация не тянет: кодировщик режет картинку.
+   *  "cpu" — не хватает компьютера, "bandwidth" — канала. */
+  screenTrouble: { reason: "cpu" | "bandwidth"; fps: number | null } | null;
+  setScreenTrouble: (reason: "cpu" | "bandwidth" | null, fps: number | null) => void;
   setVoiceConnecting: (connecting: boolean) => void;
-  setVoicePeers: (channelId: string, peers: { userId: string; muted: boolean }[]) => void;
-  voicePeerJoined: (channelId: string, userId: string, muted: boolean) => void;
+  setVoicePeers: (
+    channelId: string,
+    peers: {
+      userId: string;
+      muted: boolean;
+      deafened?: boolean;
+      screenId?: string | null;
+      videoId?: string | null;
+    }[],
+  ) => void;
+  voicePeerJoined: (channelId: string, userId: string, muted: boolean, deafened: boolean) => void;
+  setVoicePeerSharing: (channelId: string, userId: string, sharing: boolean) => void;
+  setVoicePeerVideo: (channelId: string, userId: string, video: boolean) => void;
+  setVoiceScreen: (userId: string, stream: MediaStream | null) => void;
+  setVoiceVideo: (userId: string, stream: MediaStream | null) => void;
+  setVoiceSharing: (sharing: boolean) => void;
+  setVoiceVideoOn: (on: boolean) => void;
   voicePeerLeft: (channelId: string, userId: string) => void;
-  setVoicePeerMuted: (channelId: string, userId: string, muted: boolean) => void;
+  setVoicePeerMuted: (
+    channelId: string,
+    userId: string,
+    muted: boolean,
+    deafened: boolean,
+  ) => void;
   setVoiceSpeaking: (userId: string, speaking: boolean) => void;
   setVoiceMuted: (muted: boolean) => void;
-
-  /** Открытые вкладки каналов, в порядке открытия. Общие для всех
-   *  серверов и личных переписок: это вкладки браузера, а не свойство
-   *  конкретного сервера. */
-  openChannels: string[];
-  closeChannel: (channelId: string) => void;
+  setVoiceDeafened: (deafened: boolean) => void;
 
   /** Прочитанное по каналам. Ключ — идентификатор канала. */
   /** Состояние первой загрузки. Различать «ещё не пришло»,
@@ -89,6 +198,21 @@ interface State {
 
   setMe: (me: State["me"]) => void;
   setServers: (servers: ServerDto[]) => void;
+  /** Сервер переименовали или сменили ему значок. Каналы и роль
+   *  при этом не трогаем — они приходят своими событиями. */
+  updateServer: (patch: {
+    id: string;
+    name: string;
+    iconUrl: string | null;
+    bannerUrl: string | null;
+  }) => void;
+  /** Уровень сервера поменялся — кто-то поддержал или снял поддержку. */
+  applyBoost: (patch: {
+    serverId: string;
+    boostedBy: string[];
+    level: number;
+    bannerUrl: string | null;
+  }) => void;
   /** Нас выгнали или мы вышли: убираем сервер и всё, что на него
    *  ссылалось — вкладки его каналов, открытый канал, участников. */
   removeServer: (serverId: string) => void;
@@ -130,6 +254,7 @@ export const useStore = create<State>((set, get) => ({
   servers: [],
   members: [],
   dms: [],
+  presence: new Map(),
   serverId: null,
   channelId: null,
   messages: [],
@@ -137,16 +262,37 @@ export const useStore = create<State>((set, get) => ({
   loadingHistory: false,
   connected: false,
   typing: new Map(),
-  membersOpen: true,
   replyTo: null,
-  sidebarTab: "channels",
-  openChannels: [],
 
   setReplyTo: (replyTo) => set({ replyTo }),
 
-  toggleMembers: () => set({ membersOpen: !get().membersOpen }),
+  // Новая карта, а не правка старой: подписчики сравнивают ссылку,
+  // и по изменённой на месте они бы не перерисовались.
+  setPresence: (userId, status) =>
+    set((state) => ({ presence: new Map(state.presence).set(userId, status) })),
 
-  setSidebarTab: (sidebarTab) => set({ sidebarTab }),
+  myStatus: "online",
+  setMyStatus: (myStatus) => set({ myStatus }),
+
+  games: new Map(),
+  call: null,
+
+  setCall: (call) => set({ call }),
+
+  setGame: (userId, game) =>
+    set((state) => {
+      const games = new Map(state.games);
+      if (game) games.set(userId, game);
+      else games.delete(userId);
+      return { games };
+    }),
+
+  setGames: (playing) =>
+    set((state) => {
+      const games = new Map(state.games);
+      for (const item of playing) games.set(item.userId, item.game);
+      return { games };
+    }),
 
   friendships: [],
   friendsLoaded: false,
@@ -170,24 +316,97 @@ export const useStore = create<State>((set, get) => ({
   voiceChannelId: null,
   voiceMembers: new Map(),
   voiceMuted: false,
+  voiceDeafened: false,
+  voiceMutedByDeafen: false,
   voiceConnecting: false,
+  voiceJoinedAt: null,
+  voicePing: null,
+  voicePingToServer: false,
+  voiceViaRelay: false,
+  voiceScreens: new Map(),
+  voiceVideos: new Map(),
+  voiceSharing: false,
+  voiceVideoOn: false,
+  watchingScreen: null,
+  setWatchingScreen: (watchingScreen) => set({ watchingScreen }),
 
-  setVoiceChannel: (voiceChannelId) => set({ voiceChannelId }),
+  setVoiceChannel: (voiceChannelId) =>
+    set({ voiceChannelId, voiceJoinedAt: voiceChannelId ? Date.now() : null }),
+  setVoiceSharing: (voiceSharing) => set({ voiceSharing }),
+  setVoiceVideoOn: (voiceVideoOn) => set({ voiceVideoOn }),
+
+  setVoiceVideo: (userId, stream) => {
+    const voiceVideos = new Map(get().voiceVideos);
+    if (stream) voiceVideos.set(userId, stream);
+    else voiceVideos.delete(userId);
+    set({ voiceVideos });
+  },
+
+  setVoiceScreen: (userId, stream) => {
+    const voiceScreens = new Map(get().voiceScreens);
+    if (stream) voiceScreens.set(userId, stream);
+    else voiceScreens.delete(userId);
+
+    // Показ кончился — смотреть больше нечего. Без этого «прекратить
+    // просмотр» оставалось бы висеть кнопкой в пустоту.
+    const watchingScreen =
+      get().watchingScreen === userId && !stream ? null : get().watchingScreen;
+
+    set({ voiceScreens, watchingScreen });
+  },
+  setVoicePing: (voicePing, voicePingToServer = false, voiceViaRelay = false) =>
+    set({ voicePing, voicePingToServer, voiceViaRelay }),
+
+  screenTrouble: null,
+  setScreenTrouble: (reason, fps) =>
+    set({ screenTrouble: reason === null ? null : { reason, fps } }),
+
   setVoiceConnecting: (voiceConnecting) => set({ voiceConnecting }),
 
   setVoicePeers: (channelId, peers) => {
     const voiceMembers = new Map(get().voiceMembers);
     voiceMembers.set(
       channelId,
-      new Map(peers.map((p) => [p.userId, { muted: p.muted, speaking: false }])),
+      new Map(
+        peers.map((p) => [
+          p.userId,
+          {
+            muted: p.muted,
+            deafened: Boolean(p.deafened),
+            speaking: false,
+            sharing: Boolean(p.screenId),
+            video: Boolean(p.videoId),
+          },
+        ]),
+      ),
     );
     set({ voiceMembers });
   },
 
-  voicePeerJoined: (channelId, userId, muted) => {
+  voicePeerJoined: (channelId, userId, muted, deafened) => {
     const voiceMembers = new Map(get().voiceMembers);
     const members = new Map(voiceMembers.get(channelId) ?? []);
-    members.set(userId, { muted, speaking: false });
+    members.set(userId, { muted, deafened, speaking: false, sharing: false, video: false });
+    voiceMembers.set(channelId, members);
+    set({ voiceMembers });
+  },
+
+  setVoicePeerSharing: (channelId, userId, sharing) => {
+    const voiceMembers = new Map(get().voiceMembers);
+    const members = new Map(voiceMembers.get(channelId) ?? []);
+    const current = members.get(userId);
+    if (!current || current.sharing === sharing) return;
+    members.set(userId, { ...current, sharing });
+    voiceMembers.set(channelId, members);
+    set({ voiceMembers });
+  },
+
+  setVoicePeerVideo: (channelId, userId, video) => {
+    const voiceMembers = new Map(get().voiceMembers);
+    const members = new Map(voiceMembers.get(channelId) ?? []);
+    const current = members.get(userId);
+    if (!current || current.video === video) return;
+    members.set(userId, { ...current, video });
     voiceMembers.set(channelId, members);
     set({ voiceMembers });
   },
@@ -201,12 +420,12 @@ export const useStore = create<State>((set, get) => ({
     set({ voiceMembers });
   },
 
-  setVoicePeerMuted: (channelId, userId, muted) => {
+  setVoicePeerMuted: (channelId, userId, muted, deafened) => {
     const voiceMembers = new Map(get().voiceMembers);
     const members = new Map(voiceMembers.get(channelId) ?? []);
     const current = members.get(userId);
     if (!current) return;
-    members.set(userId, { ...current, muted });
+    members.set(userId, { ...current, muted, deafened });
     voiceMembers.set(channelId, members);
     set({ voiceMembers });
   },
@@ -229,13 +448,14 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setVoiceMuted: (voiceMuted) => set({ voiceMuted }),
+  setVoiceDeafened: (voiceDeafened) => set({ voiceDeafened }),
+  setVoiceMutedByDeafen: (voiceMutedByDeafen) => set({ voiceMutedByDeafen }),
 
   openFriends: () =>
     set({
       friendsOpen: true,
       serverId: null,
       channelId: null,
-      sidebarTab: "dms",
       members: [],
       messages: [],
       nextCursor: null,
@@ -288,8 +508,27 @@ export const useStore = create<State>((set, get) => ({
     set({ readStates });
   },
 
-  setMe: (me) => set({ me }),
+  // Вместе с собой приезжает и свой выбранный статус: он хранится
+  // на сервере, и после перезагрузки страницы галочка в меню должна
+  // стоять там же, где её оставили.
+  setMe: (me) => set(me ? { me, myStatus: me.chosenStatus ?? "online" } : { me }),
   setServers: (servers) => set({ servers }),
+
+  updateServer: ({ id, name, iconUrl, bannerUrl }) =>
+    set({
+      servers: get().servers.map((s) =>
+        s.id === id ? { ...s, name, iconUrl, bannerUrl } : s,
+      ),
+    }),
+
+  // Сервер поддержали или поддержку сняли: меняются уровень, список
+  // поддержавших и баннер — он появляется и исчезает вместе с уровнем.
+  applyBoost: ({ serverId, boostedBy, level, bannerUrl }) =>
+    set({
+      servers: get().servers.map((s) =>
+        s.id === serverId ? { ...s, boostedBy, level, bannerUrl } : s,
+      ),
+    }),
 
   removeServer: (serverId) => {
     const state = get();
@@ -301,7 +540,6 @@ export const useStore = create<State>((set, get) => ({
 
     set({
       servers: state.servers.filter((s) => s.id !== serverId),
-      openChannels: state.openChannels.filter((id) => !goneChannels.has(id)),
       // Если мы стояли в этом сервере — уходим в личные сообщения.
       // Оставить открытым канал, которого больше нет, значит показать
       // пустой экран без объяснений.
@@ -313,7 +551,6 @@ export const useStore = create<State>((set, get) => ({
             messages: [],
             nextCursor: null,
             replyTo: null,
-            sidebarTab: "dms" as const,
           }
         : {}),
     });
@@ -333,7 +570,6 @@ export const useStore = create<State>((set, get) => ({
       friendsOpen: false,
       members: [],
       channelId: null,
-      sidebarTab: "dms",
       messages: [],
       nextCursor: null,
       typing: new Map(),
@@ -358,11 +594,6 @@ export const useStore = create<State>((set, get) => ({
       members: [],
       channelId: first?.id ?? null,
       friendsOpen: false,
-      sidebarTab: "channels",
-      openChannels:
-        first && !state.openChannels.includes(first.id)
-          ? [...state.openChannels, first.id]
-          : state.openChannels,
       messages: [],
       nextCursor: null,
       typing: new Map(),
@@ -371,30 +602,29 @@ export const useStore = create<State>((set, get) => ({
   },
 
   /** Открыть канал. Заодно чинит контекст вокруг него: канал чужого
-   *  сервера переключает сервер, личная переписка переключает вкладку
-   *  панели. Иначе клик по вкладке уводил бы в канал, которого нет
-   *  в текущем списке, и экран оставался бы пустым. */
+   *  сервера переключает сервер, личная переписка уводит в раздел ЛС.
+   *  Иначе открытый канал мог бы не значиться в текущем списке,
+   *  и экран остался бы пустым. */
   selectChannel: (channelId) => {
     const state = get();
+    if (state.channelId === channelId) return;
 
     const owner = state.servers.find((s) => s.channels.some((c) => c.id === channelId));
     const isDm = !owner && state.dms.some((d) => d.id === channelId);
 
-    const openChannels = state.openChannels.includes(channelId)
-      ? state.openChannels
-      : [...state.openChannels, channelId];
-
-    if (state.channelId === channelId) {
-      set({ openChannels });
-      return;
-    }
-
     set({
       channelId,
-      openChannels,
       friendsOpen: false,
-      sidebarTab: isDm ? "dms" : "channels",
-      ...(owner && owner.id !== state.serverId ? { serverId: owner.id, members: [] } : {}),
+      // Личная переписка уводит в раздел ЛС, канал сервера — на его
+      // сервер. Раньше это делала вкладка в списке каналов; её убрали,
+      // и теперь выбор раздела целиком определяется тем, что открыли.
+      // Без этого открытая из вкладки переписка показывалась бы рядом
+      // со списком каналов чужого сервера.
+      ...(isDm
+        ? { serverId: null, members: [] }
+        : owner && owner.id !== state.serverId
+          ? { serverId: owner.id, members: [] }
+          : {}),
       // Ответ относится к конкретному каналу — при переходе сбрасываем,
       // иначе набранная реплика улетит не туда.
       messages: [],
@@ -402,26 +632,6 @@ export const useStore = create<State>((set, get) => ({
       typing: new Map(),
       replyTo: null,
     });
-  },
-
-  /** Закрыть вкладку. Если закрыли текущую — переходим на соседнюю,
-   *  а не в пустоту: пустой экран после закрытия выглядит как сбой. */
-  closeChannel: (channelId) => {
-    const { openChannels, channelId: active } = get();
-    const index = openChannels.indexOf(channelId);
-    if (index === -1) return;
-
-    const rest = openChannels.filter((id) => id !== channelId);
-    set({ openChannels: rest });
-
-    if (active !== channelId) return;
-
-    const next = rest[index] ?? rest[index - 1];
-    if (next) {
-      get().selectChannel(next);
-    } else {
-      set({ channelId: null, messages: [], nextCursor: null, typing: new Map(), replyTo: null });
-    }
   },
 
   setHistory: (messages, nextCursor) =>
@@ -519,6 +729,7 @@ export const useStore = create<State>((set, get) => ({
       servers: [],
       members: [],
       dms: [],
+      presence: new Map(),
       serverId: null,
       channelId: null,
       messages: [],
@@ -528,8 +739,6 @@ export const useStore = create<State>((set, get) => ({
       replyTo: null,
       readStates: new Map(),
       loading: "pending",
-      sidebarTab: "channels",
-      openChannels: [],
       friendships: [],
       friendsLoaded: false,
       friendsOpen: false,
@@ -544,6 +753,30 @@ if (import.meta.env.DEV) {
 
 export const currentServer = (state: State): ServerDto | undefined =>
   state.servers.find((s) => s.id === state.serverId);
+
+/**
+ * Чтение статусов: подписывается на карту и отдаёт функцию, которой
+ * одинаково удобно пользоваться и для одного человека, и внутри
+ * списка, где хук на каждую строку не поставить.
+ *
+ * Тот статус, что приехал вместе со списком, остаётся запасным
+ * ответом: он верен на момент загрузки, и до первого события ничего
+ * лучше у нас нет.
+ */
+export function usePresence(): (user: { id: string; status: UserStatus }) => UserStatus {
+  const presence = useStore((s) => s.presence);
+  const me = useStore((s) => s.me);
+  const myStatus = useStore((s) => s.myStatus);
+
+  return (user) => {
+    // Себя показываем по своему же выбору, а не по тому, что о нас
+    // разослал сервер. Невидимка для всех «не в сети» — но себе он
+    // обязан выглядеть невидимкой, иначе непонятно, работает ли она
+    // вообще. Ту же роль играет предупреждающий значок в меню.
+    if (me && user.id === me.id) return myStatus === "invisible" ? "offline" : myStatus;
+    return presence.get(user.id) ?? user.status;
+  };
+}
 
 /** Есть ли непрочитанное. ULID сортируется как строка, поэтому
  *  сравнение идентификаторов — это сравнение по времени. */
@@ -635,8 +868,8 @@ export const activeChannel = (state: State): ActiveChannel | undefined => {
         isDm: false,
       };
     }
-    // Не нашли среди каналов сервера — значит открыта личная переписка
-    // на вкладке «Личные». Сервер при этом остаётся выбранным, поэтому
+    // Не нашли среди каналов сервера — значит открыта личная переписка.
+    // Такое бывает у вкладки, оставшейся от прошлого сеанса, поэтому
     // без этого запасного пути экран был бы пустым.
   }
 
