@@ -1,6 +1,8 @@
 import { Router } from "express";
-import { requireAuth } from "../../middleware/auth.js";
+import { currentUserId, requireAuth } from "../../middleware/auth.js";
 import { env } from "../../config/env.js";
+import { issueCredentials } from "../../turn/credentials.js";
+import { isPrivate, localIPv4, turnServer } from "../../turn/server.js";
 
 export const voiceRouter: Router = Router();
 
@@ -12,7 +14,7 @@ export const voiceRouter: Router = Router();
  *
  *  Доступ только для вошедших: учётные данные TURN — это платный
  *  или ограниченный ресурс, и раздавать их всем подряд нельзя. */
-voiceRouter.get("/ice", requireAuth, (_req, res) => {
+voiceRouter.get("/ice", requireAuth, (req, res) => {
   // STUN не передаёт звук — только сообщает компьютеру, как он
   // выглядит снаружи.
   //
@@ -27,6 +29,30 @@ voiceRouter.get("/ice", requireAuth, (_req, res) => {
     { urls: "stun:stun.l.google.com:19302" },
   ];
 
+  // Свой ретранслятор. Пароль — временный: он уезжает в браузер
+  // каждому, кто вошёл в разговор, то есть секретом не является
+  // и обязан протухать сам. Считается из общего секрета, хранить
+  // выданное серверу не нужно.
+  if (env.TURN_SECRET) {
+    // Адрес выбираем под спрашивающего. Другу из интернета нужен
+    // внешний, соседу по квартире — домашний: гонять его наружу
+    // и обратно умеет не всякий роутер.
+    const outside = env.TURN_HOST ?? turnServer()?.publicAddress ?? null;
+    const home = isPrivate(req.ip ?? "") || !outside;
+    const host = home ? localIPv4() : outside;
+
+    const { username, credential } = issueCredentials(env.TURN_SECRET, currentUserId(req));
+    servers.push({
+      // И UDP, и TCP: там, где провайдер режет UDP, разговор пойдёт
+      // хотя бы по TCP. Порядок важен — UDP пробуется первым, он
+      // для звука лучше.
+      urls: [`turn:${host}:${env.TURN_PORT}?transport=udp`],
+      username,
+      credential,
+    });
+  }
+
+  // Чужой ретранслятор, если когда-нибудь появится платный.
   if (env.TURN_URL) {
     servers.push({
       urls: env.TURN_URL,
@@ -35,5 +61,8 @@ voiceRouter.get("/ice", requireAuth, (_req, res) => {
     });
   }
 
-  res.json({ iceServers: servers, hasTurn: Boolean(env.TURN_URL) });
+  res.json({
+    iceServers: servers,
+    hasTurn: Boolean(env.TURN_SECRET || env.TURN_URL),
+  });
 });
