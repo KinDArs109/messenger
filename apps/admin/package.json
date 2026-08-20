@@ -1,0 +1,13 @@
+{
+  "name": "@messenger/admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Хозяйская панель мессенджера — отдельное приложение",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
+}

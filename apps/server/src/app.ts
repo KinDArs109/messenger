@@ -20,6 +20,7 @@ import { dmsRouter } from "./modules/dms/router.js";
 import { readsRouter } from "./modules/reads/router.js";
 import { uploadsRouter } from "./modules/uploads/router.js";
 import { pushRouter } from "./modules/push/router.js";
+import { adminRouter } from "./modules/admin/router.js";
 import { uploadsServeRouter } from "./modules/uploads/serve.js";
 import { downloadRouter, landingHtml, updatesRouter } from "./modules/download/router.js";
 
@@ -107,6 +108,10 @@ export function createApp() {
   app.use("/api/reads", readsRouter);
   app.use("/api/uploads", uploadsRouter);
   app.use("/api/push", pushRouter);
+  // Хозяйский раздел: отдельное приложение, не мессенджер. Внутри
+  // он сам проверяет, кто пришёл, и притворяется несуществующим
+  // для всех остальных.
+  app.use("/api/admin", adminRouter);
 
   // Вне /api: сюда ходит браузер напрямую из <img src>, без токена.
   app.use("/uploads", uploadsServeRouter);

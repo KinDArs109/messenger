@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "apps/admin"
   ],
   "scripts": {
     "dev": "concurrently -n сервер,клиент -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
