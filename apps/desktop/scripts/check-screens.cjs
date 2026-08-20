@@ -48,14 +48,28 @@ const ok = (пункт, значение, ещё) => {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Запрос без окна — для того, что проверяется до всякой отрисовки. */
-async function достать(url) {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    return { ok: res.ok, status: res.status, type: res.headers.get("content-type") ?? "", text: await res.text() };
-  } catch (error) {
-    return { ok: false, status: 0, type: "", text: "", error: String(error) };
+/**
+ * Запрос без окна — для того, что проверяется до всякой отрисовки.
+ *
+ * С тремя попытками, и это не про сервер. Проверка бегает до боевой
+ * машины через домашний канал, и он иногда обрывает рукопожатие TLS
+ * на полуслове: браузерные окна в это же время грузят по семьсот
+ * килобайт без единой заминки, а короткий запрос за манифестом
+ * не доезжает. Проверка, которая от такого краснеет, учит не верить
+ * себе — а это худшее, что с ней может случиться.
+ */
+async function достать(url, попыток = 3) {
+  let последняя = "";
+  for (let i = 0; i < попыток; i += 1) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      return { ok: res.ok, status: res.status, type: res.headers.get("content-type") ?? "", text: await res.text() };
+    } catch (error) {
+      последняя = String(error?.cause ?? error);
+      await wait(1500);
+    }
   }
+  return { ok: false, status: 0, type: "", text: "", error: последняя };
 }
 
 /*

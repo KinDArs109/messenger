@@ -3,6 +3,7 @@ import { Compass, Link2, Plus } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { CreateServerDialog } from "@/features/servers/CreateServerDialog";
 import { MobileTopBar } from "@/features/shell/MobileShell";
+import { GetTheApp } from "./GetTheApp";
 
 /** Экран для того, у кого ещё ничего нет.
  *
@@ -51,6 +52,14 @@ export function Welcome() {
                 </span>
               </span>
             </div>
+          </div>
+
+          {/* И про приложение — тому, кто только что завёл учётную
+              запись: до списка друзей он ещё не дошёл, а карточка
+              живёт там. Здесь она внизу, под двумя главными путями,
+              и так же сама решает, показываться ли. */}
+          <div className="mt-8 text-left">
+            <GetTheApp />
           </div>
 
           {creating && <CreateServerDialog onClose={() => setCreating(false)} />}

@@ -10,6 +10,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { PaneToggle } from "@/features/shell/MobileShell";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { usePlayingOf } from "./usePlaying";
+import { GetTheApp } from "@/features/shell/GetTheApp";
 
 type Tab = "all" | "pending" | "add";
 
@@ -51,6 +52,14 @@ export function FriendsPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        {/* Про приложение — здесь, а не полосой поверх переписки.
+            Друзей открывают затем, чтобы кому-то написать; это самое
+            спокойное место в мессенджере, и карточка тут никому
+            не перекрывает то, ради чего пришли. Сама решает, показываться
+            ли: в приложении её нет, а закрытая не возвращается две
+            недели. */}
+        <GetTheApp />
+
         {!loaded ? (
           <div className="space-y-2">
             {[0, 1, 2].map((i) => (
