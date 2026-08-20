@@ -373,6 +373,31 @@ function Messenger({ offline }: { offline: boolean }) {
       state.setMembers([...state.members, { ...user, role: "MEMBER" }]);
     });
 
+    /*
+     * Сервер удалили в хозяйской панели.
+     *
+     * Убираем его сразу и целиком, не дожидаясь перезагрузки: список
+     * каналов, в которые больше никого не пустят, хуже пустого места.
+     * И если мы сидели в его разговоре — выходим: канала уже нет,
+     * а микрофон продолжал бы работать в никуда.
+     */
+    socket.on("server:delete", ({ id }) => {
+      const store = useStore.getState();
+      const сервер = store.servers.find((s) => s.id === id);
+      const вРазговоре =
+        store.voiceChannelId !== null &&
+        сервер?.channels.some((c) => c.id === store.voiceChannelId) === true;
+
+      if (вРазговоре) {
+        currentSession()?.stop();
+        store.setVoiceChannel(null);
+        store.setVoiceSharing(false);
+        store.setVoiceVideoOn(false);
+      }
+
+      store.removeServer(id);
+    });
+
     socket.on("member:leave", ({ serverId, userId }) => {
       const state = useStore.getState();
       // Выгнали нас — убираем сервер целиком. Оставить его в списке

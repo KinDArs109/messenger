@@ -6,7 +6,8 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "ярлык": "powershell -NoProfile -ExecutionPolicy Bypass -File ярлык.ps1"
+    "ярлык": "powershell -NoProfile -ExecutionPolicy Bypass -File ярлык.ps1",
+    "check:panel": "electron scripts/check-panel.cjs"
   },
   "devDependencies": {
     "electron": "^34.0.0"

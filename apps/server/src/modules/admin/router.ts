@@ -5,7 +5,10 @@ import { newInviteCode } from "../../lib/ids.js";
 import { badRequest, notFound } from "../../lib/errors.js";
 import { ктоВСети } from "../../realtime/index.js";
 import { currentUserId, requireAuth } from "../../middleware/auth.js";
+import { signAccessToken } from "../../lib/tokens.js";
+import { удалитьЧеловека, удалитьСервер } from "./actions.js";
 import {
+  докогдаДверь,
   закрытьДверь,
   попроситьКод,
   принятьКод,
@@ -86,6 +89,26 @@ adminRouter.post("/session/close", (req, res) => {
 
 // Всё, что ниже, — только со второй дверью.
 adminRouter.use(требуетсяДверь);
+
+/**
+ * Продлить вход, пока дверь открыта.
+ *
+ * Панель обновляет цифры сама и потому живёт часами, а обычный токен
+ * живёт пятнадцать минут. Без продления она молча умирала посреди
+ * работы: нажал «удалить» — «требуется вход».
+ *
+ * Продление ничего не открывает сверх уже открытого: и токен, и пропуск
+ * второй двери должны быть живыми и принадлежать одному человеку —
+ * это проверено выше. Срок двери при этом не двигается: полчаса
+ * остаются получасом, иначе забытая открытой панель жила бы вечно.
+ */
+adminRouter.post("/session/renew", async (req, res) => {
+  const пропуск = req.headers["x-admin"];
+  res.json({
+    accessToken: await signAccessToken(currentUserId(req)),
+    дверьДо: typeof пропуск === "string" ? докогдаДверь(пропуск) : null,
+  });
+});
 
 /** Всё хозяйство одним ответом: панель маленькая, и делить её на пять
  *  запросов значит показывать её кусками. */
@@ -186,50 +209,7 @@ adminRouter.get("/overview", async (_req, res) => {
  * и переписка людей, которые ни при чём.
  */
 adminRouter.delete("/users/:id", async (req, res) => {
-  const id = String(req.params.id);
-  if (id === currentUserId(req)) {
-    throw badRequest("SELF", "Себя удалить нельзя");
-  }
-
-  const кто = await prisma.user.findUnique({
-    where: { id },
-    select: {
-      username: true,
-      _count: { select: { ownedServers: true, messages: true } },
-    },
-  });
-  if (!кто) throw notFound("Такого человека нет");
-
-  if (кто._count.ownedServers > 0) {
-    throw badRequest(
-      "OWNS_SERVERS",
-      `У ${кто.username} свои серверы (${кто._count.ownedServers}). Сначала удалите их — вместе с сервером уходит и переписка на нём`,
-    );
-  }
-
-  /*
-   * Сообщения удаляем сами, и это не мелочь.
-   *
-   * У сообщения автор — обычная связь без «удалять следом»: база
-   * намеренно не даёт стереть человека, за которым осталась переписка,
-   * иначе чужие разговоры превращались бы в дыры. Панель раньше
-   * налетала на этот запрет и показывала «внутреннюю ошибку сервера» —
-   * то есть ничего не объясняла.
-   *
-   * Правильный ответ здесь — не обходить запрет, а сделать то, что
-   * хозяин и имеет в виду под «удалить учётную запись»: убрать человека
-   * вместе с тем, что он написал. Всё остальное — участия в серверах,
-   * дружбы, прочитанное, вложения — уходит за ним само.
-   *
-   * Одной сделкой: если на середине что-то пойдёт не так, не должно
-   * остаться половины человека.
-   */
-  const [сообщений] = await prisma.$transaction([
-    prisma.message.deleteMany({ where: { authorId: id } }),
-    prisma.user.delete({ where: { id } }),
-  ]);
-
-  res.json({ удалён: кто.username, сообщений: сообщений.count });
+  res.json(await удалитьЧеловека(String(req.params.id), currentUserId(req)));
 });
 
 /**
@@ -244,26 +224,7 @@ adminRouter.delete("/users/:id", async (req, res) => {
  * только руками в базе.
  */
 adminRouter.delete("/servers/:id", async (req, res) => {
-  const id = String(req.params.id);
-
-  const сервер = await prisma.server.findUnique({
-    where: { id },
-    select: {
-      name: true,
-      _count: { select: { members: true, channels: true } },
-    },
-  });
-  if (!сервер) throw notFound("Такого сервера нет");
-
-  // Сообщения снова сами: канал уходит следом за сервером, а вот
-  // сообщения держатся за автора, и без этого шага удаление упёрлось бы
-  // в тот же запрет, что и у людей.
-  await prisma.$transaction([
-    prisma.message.deleteMany({ where: { channel: { serverId: id } } }),
-    prisma.server.delete({ where: { id } }),
-  ]);
-
-  res.json({ удалён: сервер.name, людей: сервер._count.members });
+  res.json(await удалитьСервер(String(req.params.id)));
 });
 
 /** Выпустить приглашение — то же, что кнопка в мессенджере, но

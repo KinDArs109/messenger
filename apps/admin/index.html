@@ -343,6 +343,31 @@
         color: var(--жёлтый);
         border-color: rgba(217, 164, 65, 0.35);
       }
+      /* Значок живого обновления: он же кнопка «перечитать сейчас».
+         Точка перед словом горит, пока связь есть, — так видно, что
+         панель не замерла, даже когда в хозяйстве ничего не меняется. */
+      #живое {
+        cursor: pointer;
+        user-select: none;
+      }
+      #живое::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        vertical-align: 1px;
+        animation: дышит 2.4s ease-in-out infinite;
+      }
+      #живое.нет::before {
+        animation: none;
+      }
+      @keyframes дышит {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.25; }
+      }
 
       button {
         font: inherit;

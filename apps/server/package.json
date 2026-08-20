@@ -34,7 +34,8 @@
     "check:login": "tsx --env-file=.env scripts/check-login.ts",
     "check:signup": "tsx --env-file=.env scripts/check-signup.ts",
     "check:idle": "tsx --env-file=.env scripts/check-idle.ts",
-    "check:admin": "tsx --env-file=.env scripts/check-admin.ts"
+    "check:admin": "tsx --env-file=.env scripts/check-admin.ts",
+    "check:live": "tsx --env-file=.env scripts/check-live.ts"
   },
   "dependencies": {
     "@messenger/shared": "*",

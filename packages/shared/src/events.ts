@@ -238,6 +238,15 @@ export interface ServerToClientEvents {
   "channel:create": (channel: ChannelDto) => void;
   "channel:update": (channel: ChannelDto) => void;
   "channel:delete": (data: { id: string; serverId: string | null }) => void;
+  /**
+   * Сервера больше нет.
+   *
+   * Раньше такого события не было вовсе: сервер удаляли из хозяйской
+   * панели прямо в базе, а у всех, кто в этот момент сидел
+   * в мессенджере, он так и оставался в списке — с каналами, в которые
+   * уже никого не пустят. Узнать правду можно было только перезагрузкой.
+   */
+  "server:delete": (data: { id: string }) => void;
   "member:join": (data: { serverId: string; user: PublicUser }) => void;
   "member:leave": (data: { serverId: string; userId: string }) => void;
   /** Кто-то начал с вами переписку — она должна появиться в списке
