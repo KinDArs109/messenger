@@ -40,7 +40,8 @@
     "check:speaking": "npm run check:speaking -w @messenger/web",
     "check:contrast": "npm run check:contrast -w @messenger/web",
     "check:amplify": "npm run check:amplify -w @messenger/web",
-    "check:alerts": "npm run check:alerts -w @messenger/web"
+    "check:alerts": "npm run check:alerts -w @messenger/web",
+    "check:people": "npm run check:people -w @messenger/web"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",

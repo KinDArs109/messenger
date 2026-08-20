@@ -13,7 +13,7 @@ import {
   VideoOff,
   VolumeX,
 } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { usePeople, useStore } from "@/lib/store";
 import { usePreferences } from "@/lib/preferences";
 import { Avatar } from "@/components/Avatar";
 import { cn } from "@/lib/utils";
@@ -37,7 +37,7 @@ import { canShareScreen, hasTwoCameras } from "@/lib/voice";
  */
 export function VoiceStage({ channelId }: { channelId: string }) {
   const members = useStore((s) => s.voiceMembers.get(channelId));
-  const people = useStore((s) => s.members);
+  const personOf = usePeople();
   const me = useStore((s) => s.me);
   const screens = useStore((s) => s.voiceScreens);
   const videos = useStore((s) => s.voiceVideos);
@@ -105,7 +105,7 @@ export function VoiceStage({ channelId }: { channelId: string }) {
             // участниках — а это одно и то же место.
             <ul className="flex flex-wrap items-start justify-center gap-3">
               {list.map(([userId, state]) => {
-                const user = userId === me?.id ? me : people.find((p) => p.id === userId);
+                const user = personOf(userId);
                 const name = user?.displayName ?? "Участник";
 
                 return (

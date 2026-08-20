@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { HeadphoneOff, MicOff, MonitorUp, Video, VolumeX } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { usePeople, useStore } from "@/lib/store";
 import { usePreferences } from "@/lib/preferences";
 import { Avatar } from "@/components/Avatar";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,7 @@ import { UserVolumeMenu } from "./UserVolumeMenu";
  *  сервер и держит состав всех каналов, а не только своего. */
 export function VoiceMembers({ channelId }: { channelId: string }) {
   const members = useStore((s) => s.voiceMembers.get(channelId));
-  const people = useStore((s) => s.members);
+  const personOf = usePeople();
   const me = useStore((s) => s.me);
   const { prefs } = usePreferences();
   const [menu, setMenu] = useState<{ userId: string; name: string; x: number; y: number } | null>(
@@ -26,10 +26,7 @@ export function VoiceMembers({ channelId }: { channelId: string }) {
   return (
     <ul className="mt-0.5 mb-1 ml-6 space-y-0.5">
       {[...members].map(([userId, state]) => {
-        // Своё имя берём из me: себя в списке участников сервера
-        // может не быть, если он ещё не догрузился.
-        const user =
-          userId === me?.id ? me : people.find((p) => p.id === userId);
+        const user = personOf(userId);
 
         const name = user?.displayName ?? "Участник";
         const silenced = prefs.mutedUsers.includes(userId);

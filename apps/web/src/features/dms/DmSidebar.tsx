@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { MessageSquare, UserPlus } from "lucide-react";
-import { hasUnread, usePresence, useStore } from "@/lib/store";
+import { hasUnread, useAcquaintance, usePresence, useStore } from "@/lib/store";
 import { Avatar } from "@/components/Avatar";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +14,7 @@ export function DmSidebar() {
   const dms = useStore((s) => s.dms);
   const me = useStore((s) => s.me);
   const statusOf = usePresence();
+  const kindOf = useAcquaintance();
   const channelId = useStore((s) => s.channelId);
   const selectChannel = useStore((s) => s.selectChannel);
   const hasServers = useStore((s) => s.servers.length > 0);
@@ -77,6 +78,12 @@ export function DmSidebar() {
             {dms.map((dm) => {
               const other = dm.participants.find((p) => p.id !== me?.id) ?? dm.participants[0];
               if (!other) return null;
+              /* Незнакомец в списке выглядел ровно как друг: те же
+                 буквы, тот же кружок. Метка стоит у имени, а не
+                 у аватара, — у аватара уже висит кружок состояния,
+                 и два значка на одном месте читаются как один
+                 непонятный. */
+              const stranger = dm.type === "DM" && !["friend", "unknown"].includes(kindOf(other.id));
               const active = dm.id === channelId;
               const read = readStates.get(dm.id);
               const unread = !active && hasUnread(read);
@@ -111,8 +118,21 @@ export function DmSidebar() {
                     >
                       {other.displayName}
                     </span>
+                    {stranger && (
+                      <span
+                        title="Не в вашем списке друзей"
+                        className="ml-auto shrink-0 rounded bg-raised px-1.5 py-px text-[10px] font-semibold tracking-wide text-muted uppercase"
+                      >
+                        не друг
+                      </span>
+                    )}
                     {mentions > 0 && (
-                      <span className="ml-auto shrink-0 rounded-full bg-danger px-1.5 text-xs font-bold text-white">
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full bg-danger px-1.5 text-xs font-bold text-white",
+                          stranger ? "" : "ml-auto",
+                        )}
+                      >
                         {mentions > 99 ? "99+" : mentions}
                       </span>
                     )}

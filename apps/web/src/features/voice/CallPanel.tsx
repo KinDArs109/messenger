@@ -10,7 +10,7 @@ import {
   Video,
   VideoOff,
 } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { usePeople, useStore } from "@/lib/store";
 import { canShareScreen } from "@/lib/voice";
 import { Avatar } from "@/components/Avatar";
 import { CallTimer } from "./CallTimer";
@@ -45,9 +45,7 @@ const ENDINGS: Record<string, string> = {
 
 export function CallPanel({ channelId }: { channelId: string }) {
   const members = useStore((s) => s.voiceMembers.get(channelId));
-  const people = useStore((s) => s.members);
-  const dms = useStore((s) => s.dms);
-  const me = useStore((s) => s.me);
+  const personOf = usePeople();
   const muted = useStore((s) => s.voiceMuted);
   const deafened = useStore((s) => s.voiceDeafened);
   const sharing = useStore((s) => s.voiceSharing);
@@ -68,16 +66,13 @@ export function CallPanel({ channelId }: { channelId: string }) {
   const ending = call?.state ? ENDINGS[call.state] : null;
 
   // Кого показываем: всех, кто сейчас в этом разговоре. Имена берём
-  // где придётся — участник может быть и в списке сервера, и только
-  // в собеседниках личной переписки.
-  const participants = [...(members?.entries() ?? [])].map(([userId, state]) => {
-    const user =
-      userId === me?.id
-        ? me
-        : (people.find((p) => p.id === userId) ??
-          dms.flatMap((dm) => dm.participants).find((p) => p.id === userId));
-    return { userId, state, user };
-  });
+  // из общей памяти — участник может быть и в списке сервера, и только
+  // в собеседниках переписки, и вообще нигде, кроме прошлого сеанса.
+  const participants = [...(members?.entries() ?? [])].map(([userId, state]) => ({
+    userId,
+    state,
+    user: personOf(userId),
+  }));
 
   return (
     <motion.div

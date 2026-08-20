@@ -508,6 +508,10 @@ function Messenger({ offline }: { offline: boolean }) {
     // и стоит в списке участников. Обновляем везде, где встречается.
     socket.on("user:update", (user) => {
       const state = useStore.getState();
+      // И в памяти о людях тоже: переименовавшийся мог быть с чужого
+      // сервера, который сейчас закрыт, — в списке участников его нет,
+      // а в разговоре он есть, и подписать его надо новым именем.
+      state.remember([user]);
       state.setMembers(state.members.map((m) => (m.id === user.id ? { ...m, ...user } : m)));
       state.renameAuthor(user);
       if (user.id === state.me?.id) state.setMe({ ...state.me, ...user });

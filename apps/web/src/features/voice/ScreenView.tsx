@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Maximize2, Minimize2, Play } from "lucide-react";
 import { desktop } from "@/lib/desktop";
-import { useStore } from "@/lib/store";
+import { usePeople, useStore } from "@/lib/store";
 import { canShareScreen } from "@/lib/voice";
 
 /**
@@ -15,9 +15,8 @@ import { canShareScreen } from "@/lib/voice";
 export function Screen({ userId, stream }: { userId: string; stream: MediaStream }) {
   const video = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  const people = useStore((s) => s.members);
   const me = useStore((s) => s.me);
-  const user = userId === me?.id ? me : people.find((p) => p.id === userId);
+  const user = usePeople()(userId);
   const own = userId === me?.id;
 
   /** Смотрим ли мы этот показ.

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { MessageDto, PublicUser } from "@messenger/shared";
-import { hasUnread, useStore } from "./store";
+import { acquaintanceOf, findPerson, hasUnread, useStore } from "./store";
 import { desktop } from "./desktop";
 import { avatarColor, initial } from "./utils";
 import { getPreferences } from "./preferences";
@@ -202,11 +202,20 @@ export function notifyMessage(message: MessageDto): void {
     ? null
     : state.servers.flatMap((s) => s.channels).find((c) => c.id === message.channelId);
 
+  // В переписке помечаем чужого прямо в заголовке. Уведомление
+  // читают, когда в мессенджер не смотрят вовсе, и «кто это?» —
+  // первый вопрос к сообщению от незнакомого имени. В канале сервера
+  // не помечаем: там все друг другу не друзья, и метка ничего
+  // не сообщала бы.
+  const stranger = !channel && acquaintanceOf(state, message.author.id) === "stranger";
+
   void avatarPng(message.author).then((icon) => {
     show({
       title: channel
         ? `${message.author.displayName} · #${channel.name}`
-        : message.author.displayName,
+        : stranger
+          ? `${message.author.displayName} · не в друзьях`
+          : message.author.displayName,
       // Вложение без текста — это не пустое сообщение, и уведомление
       // «прислал пустоту» сбивало бы с толку.
       body: message.content || "Вложение",
@@ -222,16 +231,11 @@ export function notifyMessage(message: MessageDto): void {
  * Список участников заполнен, только пока открыт сервер: ушёл человек
  * в личные сообщения — и список пуст. А уведомление о входе в разговор
  * нужно как раз тогда, когда в мессенджер не смотрят вовсе, и на каком
- * экране он был оставлен — дело случая. Поэтому смотрим ещё
- * в собеседников и в друзей.
+ * экране он был оставлен — дело случая. Поэтому поиск общий: он
+ * заглядывает ещё и в память о всех, кого мы видели.
  */
 function findUser(userId: string): PublicUser | undefined {
-  const state = useStore.getState();
-  return (
-    state.members.find((m) => m.id === userId) ??
-    state.dms.flatMap((dm) => dm.participants).find((p) => p.id === userId) ??
-    state.friendships.find((f) => f.user.id === userId)?.user
-  );
+  return findPerson(useStore.getState(), userId);
 }
 
 /**

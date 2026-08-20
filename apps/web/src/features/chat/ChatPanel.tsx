@@ -11,6 +11,7 @@ import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { TypingIndicator } from "./TypingIndicator";
 import { useCalls } from "@/features/voice/useCalls";
+import { StrangerNotice } from "@/features/dms/StrangerNotice";
 
 export function ChatPanel({ onLoadMore }: { onLoadMore: () => void }) {
   // activeChannel собирает новый объект на каждый вызов. Без
@@ -113,6 +114,12 @@ export function ChatPanel({ onLoadMore }: { onLoadMore: () => void }) {
             человек за кнопкой незачем. */}
         <PeopleToggle />
       </header>
+
+      {/* Кто это вообще такой — сразу под шапкой и до первой строки
+          переписки. Ниже она была бы уже ответом на прочитанное,
+          а нужна до него. Сама решает, показываться ли: с другом
+          её нет. */}
+      {channel.isDm && <StrangerNotice channelId={channel.id} />}
 
       {channel.type === "VOICE" ? (
         <VoiceStage channelId={channel.id} />

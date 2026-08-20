@@ -17,6 +17,23 @@ interface State {
   me: PrivateUser | null;
   servers: ServerDto[];
   members: MemberDto[];
+  /**
+   * Все, кого мы когда-либо видели: идентификатор → человек.
+   *
+   * Список участников выше живёт ровно столько, сколько открыт
+   * сервер: ушёл человек в личные сообщения — и список пуст. Пока
+   * речь шла о самом списке, это было правильно. Но по нему же
+   * узнавали имена и лица тех, кто сидит в голосовом канале, —
+   * а разговор продолжается и после ухода со страницы сервера.
+   * Выходило так: разговариваешь с другом, открыл главную — и в
+   * окошке поверх игры вместо друга «Участник» и серый кружок.
+   *
+   * Здесь — то, что забывать не надо. Человек не перестаёт быть
+   * собой оттого, что мы ушли с его сервера.
+   */
+  known: Map<string, PublicUser>;
+  /** Запомнить людей. Зовётся отовсюду, куда они приезжают. */
+  remember: (users: PublicUser[]) => void;
   dms: DmChannelDto[];
   /**
    * Кто сейчас в сети. Одно место на всё приложение.
@@ -260,6 +277,7 @@ export const useStore = create<State>((set, get) => ({
   me: null,
   servers: [],
   members: [],
+  known: new Map(),
   dms: [],
   presence: new Map(),
   serverId: null,
@@ -305,9 +323,13 @@ export const useStore = create<State>((set, get) => ({
   friendsLoaded: false,
   friendsOpen: false,
 
-  setFriendships: (friendships) => set({ friendships, friendsLoaded: true }),
+  setFriendships: (friendships) => {
+    get().remember(friendships.map((f) => f.user));
+    set({ friendships, friendsLoaded: true });
+  },
 
   upsertFriendship: (friendship) => {
+    get().remember([friendship.user]);
     const list = get().friendships;
     const index = list.findIndex((f) => f.id === friendship.id);
     set({
@@ -518,7 +540,10 @@ export const useStore = create<State>((set, get) => ({
   // Вместе с собой приезжает и свой выбранный статус: он хранится
   // на сервере, и после перезагрузки страницы галочка в меню должна
   // стоять там же, где её оставили.
-  setMe: (me) => set(me ? { me, myStatus: me.chosenStatus ?? "online" } : { me }),
+  setMe: (me) => {
+    if (me) get().remember([me]);
+    set(me ? { me, myStatus: me.chosenStatus ?? "online" } : { me });
+  },
   setServers: (servers) => set({ servers }),
 
   updateServer: ({ id, name, iconUrl, bannerUrl }) =>
@@ -567,11 +592,59 @@ export const useStore = create<State>((set, get) => ({
         : {}),
     });
   },
-  setMembers: (members) => set({ members }),
-  setDms: (dms) => set({ dms }),
+  /**
+   * Запомнить людей.
+   *
+   * Новую карту делаем, только если что-то и правда изменилось:
+   * списки участников приезжают на каждое открытие сервера, а
+   * подписчики сравнивают ссылку — иначе перерисовывалось бы всё
+   * подряд на ровном месте.
+   *
+   * Состояние («в сети», «отошёл») здесь нарочно не сверяем: оно
+   * живёт своей картой и меняется по десять раз за вечер. Здесь
+   * хранится человек, а не то, что с ним сейчас.
+   */
+  remember: (users) => {
+    const было = get().known;
+    const стало = new Map(было);
+    let менялось = false;
+
+    for (const user of users) {
+      const прежний = стало.get(user.id);
+      if (
+        прежний &&
+        прежний.username === user.username &&
+        прежний.displayName === user.displayName &&
+        прежний.avatarUrl === user.avatarUrl
+      ) {
+        continue;
+      }
+      стало.set(user.id, {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        status: user.status,
+      });
+      менялось = true;
+    }
+
+    if (менялось) set({ known: стало });
+  },
+
+  setMembers: (members) => {
+    get().remember(members);
+    set({ members });
+  },
+
+  setDms: (dms) => {
+    get().remember(dms.flatMap((dm) => dm.participants));
+    set({ dms });
+  },
 
   addDm: (dm) => {
     if (get().dms.some((d) => d.id === dm.id)) return;
+    get().remember(dm.participants);
     set({ dms: [dm, ...get().dms] });
   },
 
@@ -742,6 +815,7 @@ export const useStore = create<State>((set, get) => ({
       me: null,
       servers: [],
       members: [],
+      known: new Map(),
       dms: [],
       presence: new Map(),
       serverId: null,
@@ -761,7 +835,11 @@ export const useStore = create<State>((set, get) => ({
 
 // В режиме разработки хранилище доступно из консоли: window.__store.
 // Смотреть состояние живьём куда быстрее, чем расставлять console.log.
-if (import.meta.env.DEV) {
+//
+// Через «?» — потому что этот файл читает не только браузер: проверки
+// запускают его прямо в node, где ни сборщика, ни window нет вовсе,
+// и без осторожности хранилище падало бы на этой строке.
+if (import.meta.env?.DEV && typeof window !== "undefined") {
   (window as unknown as { __store: typeof useStore }).__store = useStore;
 }
 
@@ -790,6 +868,90 @@ export function usePresence(): (user: { id: string; status: UserStatus }) => Use
     if (me && user.id === me.id) return myStatus === "invisible" ? "offline" : myStatus;
     return presence.get(user.id) ?? user.status;
   };
+}
+
+/** Откуда берутся люди. Отдельный тип, а не всё состояние: так
+ *  функцией ниже можно пользоваться и из разметки, и вне её. */
+export interface PeopleSource {
+  me: State["me"];
+  known: Map<string, PublicUser>;
+  members: MemberDto[];
+  dms: DmChannelDto[];
+  friendships: FriendshipDto[];
+}
+
+/**
+ * Найти человека по идентификатору — где бы он ни был известен.
+ *
+ * Порядок не случаен. Сначала мы сами: своей карточки в списке
+ * участников может не быть, пока он не догрузился. Потом открытый
+ * сервер — там сведения самые свежие, включая только что сменённую
+ * аватарку. Дальше память, собеседники и друзья: это на тот случай,
+ * когда сервер закрыт, а человек всё ещё нужен — например, он сидит
+ * с нами в разговоре.
+ */
+export function findPerson(source: PeopleSource, userId: string): PublicUser | undefined {
+  if (source.me?.id === userId) return source.me;
+  return (
+    source.members.find((m) => m.id === userId) ??
+    source.known.get(userId) ??
+    source.dms.flatMap((dm) => dm.participants).find((p) => p.id === userId) ??
+    source.friendships.find((f) => f.user.id === userId)?.user
+  );
+}
+
+/** То же самое для разметки: подписывается на всё, откуда берутся
+ *  люди, и отдаёт функцию — ею одинаково удобно пользоваться и для
+ *  одного человека, и внутри списка, где хук на строку не поставить. */
+export function usePeople(): (userId: string) => PublicUser | undefined {
+  const me = useStore((s) => s.me);
+  const known = useStore((s) => s.known);
+  const members = useStore((s) => s.members);
+  const dms = useStore((s) => s.dms);
+  const friendships = useStore((s) => s.friendships);
+
+  return useMemo(
+    () => (userId: string) => findPerson({ me, known, members, dms, friendships }, userId),
+    [me, known, members, dms, friendships],
+  );
+}
+
+/**
+ * Кто нам этот человек: друг, заявка или никто.
+ *
+ * Написать в мессенджере может любой — общего сервера и то не нужно.
+ * Так и задумано: знакомятся здесь, а не в паспортном столе. Но
+ * различать своих и чужих человек должен с одного взгляда, иначе
+ * незнакомец в списке переписок выглядит ровно как друг.
+ *
+ * Пока список друзей не приехал, ответ — «пока не знаем»: показать
+ * друга чужим даже на секунду хуже, чем не показать ничего.
+ */
+export type Acquaintance = "unknown" | "friend" | "incoming" | "outgoing" | "stranger";
+
+export interface FriendSource {
+  me: State["me"];
+  friendships: FriendshipDto[];
+  friendsLoaded: boolean;
+}
+
+export function acquaintanceOf(source: FriendSource, userId: string): Acquaintance {
+  if (!source.friendsLoaded || userId === source.me?.id) return "unknown";
+  const f = source.friendships.find((item) => item.user.id === userId);
+  if (!f) return "stranger";
+  if (f.status === "ACCEPTED") return "friend";
+  return f.direction === "incoming" ? "incoming" : "outgoing";
+}
+
+export function useAcquaintance(): (userId: string) => Acquaintance {
+  const friendships = useStore((s) => s.friendships);
+  const friendsLoaded = useStore((s) => s.friendsLoaded);
+  const me = useStore((s) => s.me);
+
+  return useMemo(
+    () => (userId: string) => acquaintanceOf({ me, friendships, friendsLoaded }, userId),
+    [friendships, friendsLoaded, me],
+  );
 }
 
 /**

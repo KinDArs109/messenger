@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { currentServer, useStore } from "@/lib/store";
+import { currentServer, findPerson, useStore } from "@/lib/store";
 import { desktop, type OverlayPerson, type OverlayState } from "@/lib/desktop";
 import { watchList } from "@/lib/games";
 import { setPreference, usePreferences } from "@/lib/preferences";
@@ -26,7 +26,14 @@ export function useOverlay(): void {
   const { prefs } = usePreferences();
   const channelId = useStore((s) => s.voiceChannelId);
   const members = useStore((s) => s.voiceMembers);
-  const people = useStore((s) => s.members);
+  /* Людей берём из общей памяти, а не из списка участников открытого
+   * сервера. Список пустеет, как только человек уходит с сервера —
+   * например, на главную, — и окошко теряло собеседника ровно тогда,
+   * когда оно и нужно: разговор идёт, а поверх игры «Участник». */
+  const known = useStore((s) => s.known);
+  const serverMembers = useStore((s) => s.members);
+  const dms = useStore((s) => s.dms);
+  const friendships = useStore((s) => s.friendships);
   const me = useStore((s) => s.me);
   const muted = useStore((s) => s.voiceMuted);
   const deafened = useStore((s) => s.voiceDeafened);
@@ -122,7 +129,10 @@ export function useOverlay(): void {
     void (async () => {
       const list = [];
       for (const [userId, state] of roster ?? []) {
-        const user = userId === me?.id ? me : people.find((p) => p.id === userId);
+        const user = findPerson(
+          { me, known, members: serverMembers, dms, friendships },
+          userId,
+        );
         if (!user) continue;
 
         const key = `${userId}:${user.avatarUrl ?? ""}`;
@@ -181,7 +191,10 @@ export function useOverlay(): void {
     prefs.outputGain,
     channelId,
     members,
-    people,
+    known,
+    serverMembers,
+    dms,
+    friendships,
     me,
     muted,
     deafened,
