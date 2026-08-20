@@ -17,7 +17,7 @@ import { verifyCode } from "../../lib/totp.js";
 import { isMailEnabled } from "../../lib/mailer.js";
 import { issueEmailCode } from "./email.js";
 import { issueLoginCode, verifyLoginCode, прикрытыйАдрес } from "./loginCode.js";
-import { conflict, forbidden, unauthorized } from "../../lib/errors.js";
+import { AppError, conflict, unauthorized } from "../../lib/errors.js";
 import { env } from "../../config/env.js";
 import { timingSafeEqual } from "node:crypto";
 
@@ -63,26 +63,70 @@ async function checkSignupCode(given: string | undefined): Promise<void> {
   if (!expected) return;
 
   const code = given?.trim();
-  if (!code) throw forbidden("Регистрация только по коду приглашения");
 
-  if (code.length === expected.length) {
-    const a = Buffer.from(code);
-    const b = Buffer.from(expected);
-    // timingSafeEqual: по времени обычного сравнения короткий код
-    // подбирается посимвольно.
-    if (timingSafeEqual(a, b)) return;
+  /*
+   * Ошибка тут — не «отказано», а «вот что сделать».
+   *
+   * Раньше на пустое поле и на неверный код прилетала красная строка
+   * поверх формы: «Регистрация только по коду приглашения» и «Код
+   * не подошёл». Человек видел её над письмом и паролем — то есть
+   * не там, где ошибся, — и понятия не имел, где этот код берут.
+   * Друг, которого позвали, застрял на этом экране и просто ушёл.
+   *
+   * Поэтому подсказка идёт полем: клиент покажет её прямо под
+   * «кодом приглашения», и в ней сказано, у кого спрашивать.
+   */
+  if (!code) {
+    throw new AppError(403, "SIGNUP_CODE_REQUIRED", "Нужен код приглашения", {
+      signupCode: "Спросите у того, кто вас позвал, или откройте его ссылку",
+    });
   }
 
+  /*
+   * Сравниваем байты, а не буквы.
+   *
+   * Длину раньше брали у строки, а сравнивали буферы — и это совпадало
+   * только пока обе строки латинские. Русская буква занимает два байта:
+   * шестнадцать букв кириллицей — это двадцать семь байт, и
+   * timingSafeEqual, которому дали буферы разной длины, не возвращает
+   * «не сошлось», а бросает ошибку. Наружу летела «внутренняя ошибка
+   * сервера» вместо «код не подошёл» — человек с русской раскладкой
+   * упирался в неё, ничего не понимая.
+   *
+   * timingSafeEqual тут по-прежнему нужен: по времени обычного
+   * сравнения короткий код подбирается посимвольно.
+   */
+  const дано = Buffer.from(code, "utf8");
+  const ждали = Buffer.from(expected, "utf8");
+  if (дано.length === ждали.length && timingSafeEqual(дано, ждали)) return;
+
+  // Коды приглашений выдаются строчными; человек, переписавший код
+  // с чужого экрана заглавными, не должен получать отказ из-за этого.
   const invite = await prisma.invite.findUnique({
-    where: { code },
+    where: { code: code.toLowerCase() },
     select: { expiresAt: true, maxUses: true, uses: true },
   });
-  const valid =
+
+  const годен =
     invite !== null &&
     (invite.expiresAt === null || invite.expiresAt > new Date()) &&
     (invite.maxUses === null || invite.uses < invite.maxUses);
 
-  if (!valid) throw forbidden("Код не подошёл");
+  if (годен) return;
+
+  // Просроченное приглашение и опечатка — разные беды, и лечатся они
+  // по-разному: в первом случае надо просить новую ссылку, во втором
+  // достаточно перечитать код.
+  throw new AppError(
+    403,
+    "SIGNUP_CODE_BAD",
+    invite ? "Это приглашение больше не действует" : "Код не подошёл",
+    {
+      signupCode: invite
+        ? "Попросите новую ссылку — эта истекла"
+        : "Проверьте код или попросите ссылку-приглашение",
+    },
+  );
 }
 
 export async function register(input: RegisterInput, userAgent?: string, client?: string) {
