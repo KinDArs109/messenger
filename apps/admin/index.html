@@ -6,82 +6,458 @@
     <style>
       /*
        * Панель для одного человека — того, кто держит мессенджер.
-       * Поэтому ни сборки, ни фреймворка: одна страница, которую видно
-       * целиком и можно поправить блокнотом. Оформление намеренно
-       * похоже на сам мессенджер, чтобы не переучиваться.
+       * Ни сборки, ни фреймворка: одна страница, которую видно целиком
+       * и можно поправить блокнотом.
+       *
+       * Первая версия была таблицей на таблице: три одинаковых сетки
+       * подряд, и глазу не за что зацепиться — что люди, что серверы,
+       * что приглашения выглядели одним полотном. Теперь у каждого
+       * раздела своя форма: люди — строками с лицами, серверы —
+       * плитками, приглашения — узким списком с кодами. Сверху цифры,
+       * ради которых панель чаще всего и открывают.
        */
       :root {
-        --фон: #101114;
-        --карточка: #16171a;
-        --полоса: #1e2024;
-        --текст: #dbdee1;
+        color-scheme: dark;
+
+        --фон: #0e0f12;
+        --карточка: #16181c;
+        --выше: #1c1f24;
+        --грань: #24272d;
+        --текст: #d5d8dd;
         --ярко: #f2f3f5;
-        --тускло: #949ba4;
-        --синий: #3b82f6;
-        --красный: #d83c3e;
-        --зелёный: #23a559;
+        --тускло: #8b919b;
+        --синий: #4a8cf7;
+        --красный: #e0484b;
+        --зелёный: #2bb35f;
+        --жёлтый: #d9a441;
+        --сирень: #a17ff0;
       }
-      * { box-sizing: border-box; }
+
+      /* Полосу прокрутки рисует система, и по умолчанию — светлой:
+         на тёмной странице справа висела белая. color-scheme выше
+         говорит браузеру, какого цвета здесь всё остальное, а это —
+         чтобы она была потоньше и в цвет страницы. */
+      ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #2b2f36;
+        border: 3px solid var(--фон);
+        border-radius: 8px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3a3f48;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
         background: var(--фон);
         color: var(--текст);
-        font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
+        font:
+          14px/1.45 system-ui,
+          "Segoe UI",
+          sans-serif;
       }
+
+      /* ── Шапка ─────────────────────────────────────────────── */
+
       header {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 14px 20px;
-        background: var(--карточка);
-        border-bottom: 1px solid #000;
+        gap: 14px;
+        padding: 16px 24px;
+        background: linear-gradient(180deg, #191c21, #16181c);
+        border-bottom: 1px solid var(--грань);
         position: sticky;
         top: 0;
+        z-index: 5;
       }
-      header h1 { font-size: 15px; margin: 0; color: var(--ярко); }
-      header .адрес { color: var(--тускло); font-size: 13px; }
-      header .справа { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-      main { padding: 20px; max-width: 1100px; margin: 0 auto; }
-      section { margin-bottom: 28px; }
-      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--тускло); }
-      table { width: 100%; border-collapse: collapse; background: var(--карточка); border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--полоса); }
-      th { color: var(--тускло); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-      tr:last-child td { border-bottom: none; }
+      header .знак {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        background: linear-gradient(135deg, var(--синий), var(--сирень));
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        color: #fff;
+      }
+      header h1 {
+        font-size: 15px;
+        margin: 0;
+        color: var(--ярко);
+        letter-spacing: 0.01em;
+      }
+      header .адрес {
+        color: var(--тускло);
+        font-size: 12.5px;
+      }
+      header .справа {
+        margin-left: auto;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      main {
+        padding: 22px 24px 40px;
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+
+      /* ── Цифры сверху ──────────────────────────────────────── */
+
+      .цифры {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 12px;
+        margin-bottom: 26px;
+      }
+      .цифра {
+        background: var(--карточка);
+        border: 1px solid var(--грань);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+      .цифра b {
+        display: block;
+        font-size: 26px;
+        line-height: 1.1;
+        color: var(--ярко);
+        font-weight: 650;
+      }
+      .цифра span {
+        color: var(--тускло);
+        font-size: 12.5px;
+      }
+      .цифра.зелёная b {
+        color: var(--зелёный);
+      }
+
+      /* ── Разделы ───────────────────────────────────────────── */
+
+      section {
+        margin-bottom: 30px;
+      }
+      h2 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--тускло);
+        margin: 0 0 12px 2px;
+        font-weight: 700;
+      }
+      h2 .метка {
+        width: 6px;
+        height: 6px;
+        border-radius: 2px;
+      }
+      h2 .сколько {
+        color: #5d636e;
+        letter-spacing: 0;
+        text-transform: none;
+        font-weight: 500;
+      }
+
+      /* ── Люди ──────────────────────────────────────────────── */
+
+      .люди {
+        background: var(--карточка);
+        border: 1px solid var(--грань);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .человек {
+        display: grid;
+        grid-template-columns: 38px minmax(180px, 1.4fr) minmax(
+            200px,
+            1.6fr
+          ) 130px 90px 88px;
+        gap: 12px;
+        align-items: center;
+        padding: 11px 16px;
+        border-bottom: 1px solid var(--грань);
+      }
+      .человек:last-child {
+        border-bottom: none;
+      }
+      .человек:hover {
+        background: var(--выше);
+      }
+      .лицо {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-weight: 650;
+        font-size: 14px;
+        position: relative;
+      }
+      .лицо i {
+        position: absolute;
+        right: -1px;
+        bottom: -1px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        border: 2.5px solid var(--карточка);
+        background: #4e545e;
+      }
+      .человек:hover .лицо i {
+        border-color: var(--выше);
+      }
+      .лицо i.вСети {
+        background: var(--зелёный);
+      }
+      .имя {
+        color: var(--ярко);
+        font-weight: 600;
+      }
+      .кличка {
+        color: var(--тускло);
+        font-size: 12.5px;
+      }
+      .почта {
+        font-size: 13px;
+        word-break: break-all;
+      }
+      .мелко {
+        color: var(--тускло);
+        font-size: 12.5px;
+      }
+
+      /* ── Серверы плитками ──────────────────────────────────── */
+
+      .серверы {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+        gap: 12px;
+      }
+      .сервер {
+        background: var(--карточка);
+        border: 1px solid var(--грань);
+        border-radius: 12px;
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .сервер:hover {
+        border-color: #33373f;
+      }
+      .сервер .верх {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .щит {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        color: #fff;
+        font-size: 13px;
+      }
+      .сервер .название {
+        color: var(--ярко);
+        font-weight: 600;
+      }
+      .фишки {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .фишка {
+        background: var(--выше);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 12px;
+        color: var(--тускло);
+      }
+
+      /* ── Приглашения ───────────────────────────────────────── */
+
+      .приглашения {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .приглашение {
+        display: grid;
+        grid-template-columns: 130px 1fr 120px 130px auto;
+        gap: 12px;
+        align-items: center;
+        background: var(--карточка);
+        border: 1px solid var(--грань);
+        border-left: 3px solid var(--зелёный);
+        border-radius: 10px;
+        padding: 10px 14px;
+      }
+      .приглашение.мертво {
+        border-left-color: #3a3e45;
+        opacity: 0.55;
+      }
+      code {
+        font:
+          13px/1 ui-monospace,
+          Consolas,
+          monospace;
+        background: var(--выше);
+        padding: 5px 8px;
+        border-radius: 6px;
+        color: var(--ярко);
+      }
+
+      /* ── Мелочи ────────────────────────────────────────────── */
+
+      .значок {
+        display: inline-block;
+        font-size: 11.5px;
+        padding: 2px 7px;
+        border-radius: 20px;
+        border: 1px solid transparent;
+      }
+      .значок.да {
+        color: var(--зелёный);
+        border-color: rgba(43, 179, 95, 0.35);
+      }
+      .значок.нет {
+        color: var(--тускло);
+        border-color: var(--грань);
+      }
+      .значок.жёлтый {
+        color: var(--жёлтый);
+        border-color: rgba(217, 164, 65, 0.35);
+      }
+
       button {
         font: inherit;
-        border: none;
-        border-radius: 6px;
+        border: 1px solid transparent;
+        border-radius: 8px;
         padding: 7px 12px;
-        background: var(--полоса);
+        background: var(--выше);
         color: var(--текст);
         cursor: pointer;
+        transition:
+          background 0.12s,
+          color 0.12s;
       }
-      button:hover { background: #2a2d33; }
-      button.главная { background: var(--синий); color: #fff; }
-      button.опасная { background: transparent; color: var(--красный); }
-      button.опасная:hover { background: rgba(216, 60, 62, .12); }
+      button:hover {
+        background: #2a2e35;
+      }
+      button.главная {
+        background: var(--синий);
+        color: #fff;
+      }
+      button.главная:hover {
+        background: #3b7ce8;
+      }
+      button.опасная {
+        background: transparent;
+        color: #9aa0aa;
+        border-color: var(--грань);
+      }
+      button.опасная:hover {
+        background: rgba(224, 72, 75, 0.12);
+        color: var(--красный);
+        border-color: rgba(224, 72, 75, 0.4);
+      }
+      button.мелкая {
+        padding: 5px 10px;
+        font-size: 12.5px;
+      }
+
       input {
         font: inherit;
-        background: var(--полоса);
-        border: 1px solid var(--полоса);
-        border-radius: 6px;
-        padding: 9px 11px;
+        background: var(--выше);
+        border: 1px solid var(--грань);
+        border-radius: 8px;
+        padding: 10px 12px;
         color: var(--текст);
         width: 100%;
       }
-      input:focus { outline: none; border-color: var(--синий); }
-      .вход { max-width: 340px; margin: 12vh auto; background: var(--карточка); padding: 24px; border-radius: 10px; }
-      .вход label { display: block; margin-bottom: 12px; color: var(--тускло); font-size: 12px; text-transform: uppercase; }
-      .вход input { margin-top: 6px; }
-      .тускло { color: var(--тускло); }
-      .да { color: var(--зелёный); }
-      .нет { color: var(--тускло); }
-      .ошибка { background: rgba(216,60,62,.12); color: var(--красный); padding: 9px 12px; border-radius: 6px; margin-bottom: 12px; }
-      .успех { background: rgba(35,165,89,.12); color: var(--зелёный); padding: 9px 12px; border-radius: 6px; margin-bottom: 12px; }
-      .точка { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-      code { background: var(--полоса); padding: 2px 6px; border-radius: 4px; }
-      .ряд { display: flex; gap: 8px; align-items: center; }
+      input:focus {
+        outline: none;
+        border-color: var(--синий);
+      }
+
+      .вход {
+        max-width: 350px;
+        margin: 12vh auto;
+        background: var(--карточка);
+        border: 1px solid var(--грань);
+        padding: 26px;
+        border-radius: 14px;
+      }
+      .вход label {
+        display: block;
+        margin-bottom: 14px;
+        color: var(--тускло);
+        font-size: 11.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .вход input {
+        margin-top: 6px;
+      }
+
+      .тускло {
+        color: var(--тускло);
+      }
+      .ошибка {
+        background: rgba(224, 72, 75, 0.12);
+        color: var(--красный);
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 14px;
+      }
+      .успех {
+        background: rgba(43, 179, 95, 0.12);
+        color: var(--зелёный);
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+      }
+      .ряд {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .пусто {
+        color: var(--тускло);
+        padding: 18px;
+        text-align: center;
+      }
+
+      @media (max-width: 900px) {
+        .человек {
+          grid-template-columns: 38px 1fr auto;
+          row-gap: 4px;
+        }
+        .человек .скрыть {
+          display: none;
+        }
+        .приглашение {
+          grid-template-columns: 1fr auto;
+        }
+        .приглашение .скрыть {
+          display: none;
+        }
+      }
     </style>
   </head>
   <body>

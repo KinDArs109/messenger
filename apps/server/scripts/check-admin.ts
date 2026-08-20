@@ -141,6 +141,46 @@ async function main() {
 
   const проверка = await prisma.user.count({ where: { username: `${MARK}.chuzhoy` } });
   ok("и он действительно исчез из базы", проверка === 0);
+
+  /*
+   * Человек с перепиской. Из-за него панель и падала «внутренней
+   * ошибкой сервера»: у сообщения автор — обычная связь без «удалять
+   * следом», и база не даёт стереть того, за кем осталась переписка.
+   * Теперь сообщения уходят вместе с ним, одной сделкой.
+   */
+  const почта = await завести("pisatel");
+  const писатель = await prisma.user.findUniqueOrThrow({
+    where: { email: почта },
+    select: { id: true },
+  });
+  const свойСервер = await prisma.server.create({
+    data: { id: ulid(), name: `${MARK} сервер`, ownerId: писатель.id },
+  });
+  const канал = await prisma.channel.create({
+    data: { id: ulid(), serverId: свойСервер.id, name: "общий", type: "TEXT", position: 0 },
+  });
+  await prisma.message.create({
+    data: { id: ulid(), channelId: канал.id, authorId: писатель.id, content: "проверка" },
+  });
+
+  const сСервером = await запрос(`/admin/users/${писатель.id}`, токен, { method: "DELETE" });
+  ok("человека с своими серверами не удаляют молча", сСервером.статус === 400, {
+    статус: сСервером.статус,
+    ответ: (сСервером.тело.error as { message?: string } | undefined)?.message,
+  });
+
+  const серверУдалён = await запрос(`/admin/servers/${свойСервер.id}`, токен, { method: "DELETE" });
+  ok("сервер удаляется целиком", серверУдалён.статус === 200, { статус: серверУдалён.статус });
+  ok(
+    "и уносит с собой каналы и переписку",
+    (await prisma.channel.count({ where: { serverId: свойСервер.id } })) === 0 &&
+      (await prisma.message.count({ where: { authorId: писатель.id } })) === 0,
+  );
+
+  const сПерепиской = await запрос(`/admin/users/${писатель.id}`, токен, { method: "DELETE" });
+  ok("а теперь и сам человек удаляется", сПерепиской.статус === 200, {
+    статус: сПерепиской.статус,
+  });
 }
 
 async function убрать() {
