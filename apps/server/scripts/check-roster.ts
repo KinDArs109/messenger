@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { ulid } from "ulid";
 import { io, type Socket } from "socket.io-client";
 import { hashPassword } from "../src/lib/password.js";
+import { войти } from "./login.js";
 
 /**
  * Проверка: видно ли, что в голосовом канале кто-то сидит, если сам
@@ -55,15 +56,9 @@ function connect(token: string): Promise<Socket> {
   });
 }
 
-async function login(who: string): Promise<string> {
-  const res = await fetch(`${URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login: who, password: PASSWORD }),
-  });
-  if (!res.ok) throw new Error(`Вход как ${who}: HTTP ${res.status}`);
-  return ((await res.json()) as { accessToken: string }).accessToken;
-}
+// Вход теперь в два шага — код из письма кладёт себе в ящик
+// общий помощник, у него есть база.
+const login = (who: string): Promise<string> => войти(URL, prisma, who, PASSWORD);
 
 async function main(): Promise<void> {
   console.log(`\nПроверка состава голосового канала — ${URL}\n`);

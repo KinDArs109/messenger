@@ -9,6 +9,7 @@
 // у собеседника.
 
 const { app, BrowserWindow, session } = require("electron");
+const { войтиВСтранице, войтиСнаружи } = require("./login.cjs");
 
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 app.on("window-all-closed", () => undefined);
@@ -41,11 +42,7 @@ async function окно(who, partition, x) {
   });
 
   await win.loadURL(`${SITE}/?app`);
-  await win.webContents.executeJavaScript(`
-    fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
-      credentials: "include", body: JSON.stringify({ login: ${JSON.stringify(who)}, password: ${JSON.stringify(PASS)} }) })
-      .then((r) => r.json()).then((d) => Boolean(d.accessToken))
-  `);
+  await win.webContents.executeJavaScript(войтиВСтранице(who, PASS));
   await win.loadURL(`${SITE}/?app`);
   await wait(3000);
   return win;

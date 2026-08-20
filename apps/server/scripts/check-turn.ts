@@ -5,6 +5,7 @@ import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { ulid } from "ulid";
 import { hashPassword } from "../src/lib/password.js";
+import { войти } from "./login.js";
 
 /**
  * Проверка ретранслятора голоса.
@@ -119,13 +120,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    const auth = await fetch(`${URL_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login: user.email, password: PASSWORD }),
-    });
-    if (!auth.ok) throw new Error(`вход: HTTP ${auth.status}`);
-    const { accessToken } = (await auth.json()) as { accessToken: string };
+    const accessToken = await войти(URL_BASE, prisma, user.email, PASSWORD);
 
     const res = await fetch(`${URL_BASE}/api/voice/ice`, {
       headers: { Authorization: `Bearer ${accessToken}` },

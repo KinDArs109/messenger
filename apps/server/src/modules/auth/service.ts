@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type User } from "@prisma/client";
 import type { LoginInput, RegisterInput } from "@messenger/shared";
 import { prisma } from "../../db/client.js";
 import { newId } from "../../lib/ids.js";
@@ -9,10 +9,14 @@ import {
   hashRefreshToken,
   refreshTokenExpiry,
   signAccessToken,
+  signLoginTicket,
+  verifyLoginTicket,
 } from "../../lib/tokens.js";
 import { toPrivateUser } from "../../lib/dto.js";
 import { verifyCode } from "../../lib/totp.js";
+import { isMailEnabled } from "../../lib/mailer.js";
 import { issueEmailCode } from "./email.js";
+import { issueLoginCode, verifyLoginCode, прикрытыйАдрес } from "./loginCode.js";
 import { conflict, forbidden, unauthorized } from "../../lib/errors.js";
 import { env } from "../../config/env.js";
 import { timingSafeEqual } from "node:crypto";
@@ -142,6 +146,35 @@ function findByLogin(login: string) {
     : prisma.user.findUnique({ where: { username: login } });
 }
 
+/**
+ * Второй шаг входа — общий для пароля и одноразовых кодов.
+ *
+ * Пароль (или код из приложения) доказывает, что человек знает
+ * секрет. Этого мало: секреты утекают, и чаще всего не отсюда,
+ * а с других сайтов, где совпал пароль. Поэтому дальше — письмо.
+ *
+ * Пока почта на сервере не настроена, шага просто нет: иначе одна
+ * забытая строка в .env заперла бы снаружи всех. Та же оговорка,
+ * что и у заставы подтверждения почты, и по той же причине.
+ */
+async function второйШаг(user: User) {
+  if (!isMailEnabled()) return null;
+
+  // Письмо уходит, только если годного кода ещё нет: иначе человек
+  // получил бы второе письмо, а код из первого, открытого у него,
+  // перестал бы подходить. Отсюда и второе слагаемое: код на руках —
+  // тоже «письмо у вас есть», хотя прямо сейчас мы ничего не слали.
+  const sent = await issueLoginCode(user, false).catch(() => false);
+  const годныйКод = Boolean(user.loginCodeHash && user.loginCodeExpires && user.loginCodeExpires > new Date());
+
+  return {
+    pending: "email" as const,
+    ticket: await signLoginTicket(user.id),
+    email: прикрытыйАдрес(user.email),
+    sent: sent || годныйКод,
+  };
+}
+
 export async function login(input: LoginInput, userAgent?: string, client?: string) {
   const user = await findByLogin(input.login);
 
@@ -153,17 +186,42 @@ export async function login(input: LoginInput, userAgent?: string, client?: stri
     throw unauthorized("Неверный логин или пароль");
   }
 
-  // Не подтвердил почту — код уходит сразу, вместе со входом.
-  // Иначе человек упирается в экран «введите код», нажимает
-  // «отправить», ждёт письмо — три действия там, где хватает одного.
-  //
-  // Пауза между письмами соблюдается (false), а отказ по ней —
-  // не ошибка входа: письмо и так уже в пути.
-  if (!user.emailVerifiedAt) {
-    void issueEmailCode(user.id, false).catch(() => undefined);
-  }
+  const письмом = await второйШаг(user);
+  if (письмом) return письмом;
 
   return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
+}
+
+/**
+ * Второй шаг пройден: код из письма сошёлся — выдаём сессию.
+ *
+ * Пропуск с первого шага обязателен. Без него хватило бы знать чужой
+ * логин и угадать шесть цифр, пока настоящий хозяин входит, — а так
+ * нужен ещё и пароль, которым этот пропуск получен.
+ */
+export async function finishLogin(
+  ticket: string,
+  code: string,
+  userAgent?: string,
+  client?: string,
+) {
+  const userId = await verifyLoginTicket(ticket);
+  if (!userId) throw unauthorized("Вход просрочен — начните заново");
+
+  const user = await verifyLoginCode(userId, code);
+  return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
+}
+
+/** Письмо не дошло — отправить ещё раз. Пропуск тот же: заново
+ *  вводить пароль ради нового письма человек не должен. */
+export async function resendLoginCode(ticket: string) {
+  const userId = await verifyLoginTicket(ticket);
+  if (!userId) throw unauthorized("Вход просрочен — начните заново");
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw unauthorized("Вход просрочен — начните заново");
+
+  return { sent: await issueLoginCode(user, false), email: прикрытыйАдрес(user.email) };
 }
 
 /** Вход по одноразовому коду вместо пароля.
@@ -182,6 +240,12 @@ export async function loginWithCode(
   if (!user?.totpSecret || !user.totpEnabledAt || !verifyCode(user.totpSecret, input.code)) {
     throw unauthorized("Неверный логин или код");
   }
+
+  // Письмо спрашиваем и здесь. Одноразовый код заменяет пароль,
+  // а не письмо: телефон теряют и забывают разлоченным ровно так же,
+  // как узнают пароли.
+  const письмом = await второйШаг(user);
+  if (письмом) return письмом;
 
   return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
 }

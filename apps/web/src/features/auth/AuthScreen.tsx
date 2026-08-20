@@ -1,17 +1,26 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { LIMITS, type PrivateUser, type SignupPolicyDto } from "@messenger/shared";
+import { LIMITS, type LoginPendingDto, type PrivateUser, type SignupPolicyDto } from "@messenger/shared";
 import { api, ApiError, setAccessToken } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
 import { PasswordInput } from "@/components/ui/PasswordInput";
 import { ForgotPassword } from "./ForgotPassword";
+import { LoginCodeStep } from "./LoginCodeStep";
 
 interface AuthResponse {
   user: PrivateUser;
   accessToken: string;
 }
+
+/** Вход бывает в два шага: сначала пароль, потом код из письма.
+ *  Различаем ответы по pending — знать, настроена ли на сервере
+ *  почта, клиенту не нужно. */
+type LoginAnswer = AuthResponse | LoginPendingDto;
+
+const нуженКод = (r: LoginAnswer): r is LoginPendingDto =>
+  (r as LoginPendingDto).pending === "email";
 
 type Mode = "login" | "register";
 
@@ -42,6 +51,8 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
   const [signupCode, setSignupCode] = useState(inviteCodeFromUrl);
   const [codeRequired, setCodeRequired] = useState(false);
   const [forgot, setForgot] = useState(false);
+  /** Пропуск и адрес со второго шага. null — второго шага нет. */
+  const [письмом, setПисьмом] = useState<LoginPendingDto | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -77,7 +88,14 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
         : byCode
           ? { login, code }
           : { login, password };
-      const r = await api.post<AuthResponse>(path, body);
+      const r = await api.post<LoginAnswer>(path, body);
+      // Сессии ещё нет: сервер ждёт код из письма. Пароль при этом
+      // остаётся в форме позади — если человек вернётся «назад»,
+      // ему не придётся набирать его заново.
+      if (нуженКод(r)) {
+        setПисьмом(r);
+        return;
+      }
       setAccessToken(r.accessToken);
       setMe(r.user);
     } catch (err) {
@@ -105,7 +123,9 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
       >
         {hint}
 
-        {forgot ? (
+        {письмом ? (
+          <LoginCodeStep шаг={письмом} onBack={() => setПисьмом(null)} />
+        ) : forgot ? (
           <div className="rounded-xl bg-sidebar p-8 shadow-2xl">
             <ForgotPassword onBack={() => setForgot(false)} />
           </div>

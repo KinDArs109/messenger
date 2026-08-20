@@ -100,3 +100,35 @@ export const authResponseSchema = z.object({
   expiresIn: z.number(),
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
+
+/** Второй шаг входа: пропуск с первого шага и шесть цифр из письма. */
+export const loginConfirmSchema = z.object({
+  ticket: z.string().min(10).max(2048),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Код состоит из шести цифр"),
+});
+
+/** Письмо не дошло — отправить ещё раз по тому же пропуску. */
+export const loginResendSchema = z.object({
+  ticket: z.string().min(10).max(2048),
+});
+
+/**
+ * Ответ на первый шаг входа, когда нужен код из письма.
+ *
+ * Сессии здесь ещё нет — ни токена, ни cookie. Клиент отличает этот
+ * ответ от обычного по полю pending и показывает поле для кода.
+ */
+export interface LoginPendingDto {
+  pending: "email";
+  /** Пропуск на второй шаг: подписан сервером, живёт пятнадцать минут. */
+  ticket: string;
+  /** Адрес, наполовину закрытый: человеку — подсказка, в какой ящик
+   *  идти; чужому, знающему только пароль, — ничего нового. */
+  email: string;
+  /** Ушло ли письмо. false — почта на сервере молчит, и это надо
+   *  сказать прямо, а не оставлять человека ждать. */
+  sent: boolean;
+}

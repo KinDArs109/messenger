@@ -29,7 +29,9 @@
     "bench": "tsx --env-file=.env scripts/bench.ts",
     "fixture:call": "tsx --env-file=.env scripts/call-fixture.ts",
     "check:verify": "tsx --env-file=.env scripts/check-verify.ts",
-    "db:verified": "tsx --env-file=.env scripts/set-verified.ts"
+    "db:verified": "tsx --env-file=.env scripts/set-verified.ts",
+    "db:login-code": "tsx --env-file=.env scripts/set-login-code.ts",
+    "check:login": "tsx --env-file=.env scripts/check-login.ts"
   },
   "dependencies": {
     "@messenger/shared": "*",

@@ -19,6 +19,7 @@
 const { app, BrowserWindow, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { войтиВСтранице, войтиСнаружи } = require("./login.cjs");
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
@@ -59,14 +60,7 @@ async function openFor(who, partition, x) {
 
   // Вход запросом: cookie ставится браузером, дальше приложение
   // поднимает сессию само при перезагрузке.
-  const logged = await win.webContents.executeJavaScript(`
-    fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ login: ${JSON.stringify(who)}, password: ${JSON.stringify(PASS)} }),
-    }).then((r) => r.json()).then((d) => Boolean(d.accessToken))
-  `);
+  const logged = await win.webContents.executeJavaScript(войтиВСтранице(who, PASS));
   if (!logged) throw new Error(`не удалось войти как ${who}`);
 
   await win.loadURL(`${SITE}/?app`);

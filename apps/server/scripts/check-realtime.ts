@@ -3,6 +3,7 @@ import { io, type Socket } from "socket.io-client";
 import { PrismaClient } from "@prisma/client";
 import { ulid } from "ulid";
 import { hashPassword } from "../src/lib/password.js";
+import { войти } from "./login.js";
 
 /**
  * Проверка сокетного слоя: вход, подписки, «печатает», доставка
@@ -28,16 +29,10 @@ const fail = (s: string) => {
   process.exitCode = 1;
 };
 
-async function login(who: string): Promise<string> {
-  const res = await fetch(`${URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login: who, password: PASSWORD }),
-  });
-  if (!res.ok) throw new Error(`Не удалось войти как ${who}: HTTP ${res.status}`);
-  const data = (await res.json()) as { accessToken: string };
-  return data.accessToken;
-}
+// Вход теперь в два шага: пароль, потом код из письма. Писем
+// проверка не читает — за неё это делает общий помощник, которому
+// доступна база.
+const login = (who: string): Promise<string> => войти(URL, prisma, who, PASSWORD);
 
 function tryConnect(token?: string): Promise<{ connected: boolean; error?: string }> {
   return new Promise((resolve) => {

@@ -23,6 +23,7 @@ const { app, BrowserWindow } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const { войтиВСтранице, войтиСнаружи } = require("./login.cjs");
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
@@ -105,134 +106,7 @@ async function connect(url) {
   pilot = new BrowserWindow({ show: false, webPreferences: { contextIsolation: false } });
   await pilot.loadURL("about:blank");
 
-  await pilot.webContents.executeJavaScript(`
-    new Promise((resolve, reject) => {
-      window.__ждут = new Map();
-      window.__номер = 0;
-      window.__ws = new WebSocket(${JSON.stringify(url)});
-      window.__ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        const waiting = window.__ждут.get(message.id);
-        if (waiting) { window.__ждут.delete(message.id); waiting(message); }
-      };
-      window.__ws.onopen = () => resolve(true);
-      window.__ws.onerror = () => reject(new Error("не подключились"));
-      window.__команда = (method, params) => new Promise((done) => {
-        const id = ++window.__номер;
-        window.__ждут.set(id, done);
-        window.__ws.send(JSON.stringify({ id, method, params: params ?? {} }));
-      });
-    })
-  `);
-}
-
-/** Одна команда протокола. */
-async function cdp(method, params) {
-  const raw = await pilot.webContents.executeJavaScript(
-    `window.__команда(${JSON.stringify(method)}, ${JSON.stringify(params ?? {})}).then((r) => JSON.stringify(r))`,
-  );
-  const answer = JSON.parse(raw);
-  if (answer.error) throw new Error(`${method}: ${answer.error.message}`);
-  return answer.result;
-}
-
-/** Выполнить выражение на странице Chrome и получить значение.
- *
- *  Ошибки не глотаем: молчаливое null здесь означало бы «на странице
- *  этого нет», хотя на самом деле отвалилось соединение с отладчиком —
- *  и чинишь потом не то. */
-async function run(expression) {
-  const result = await cdp("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-  });
-  if (result.exceptionDetails) {
-    const text = result.exceptionDetails.exception?.description ?? result.exceptionDetails.text;
-    throw new Error(String(text).split("\n")[0]);
-  }
-  return result.result?.value ?? null;
-}
-
-/** Дождаться, пока на странице появится нужное. */
-async function until(expression, timeoutMs = 20_000) {
-  const till = Date.now() + timeoutMs;
-  let last = null;
-  while (Date.now() < till) {
-    try {
-      const value = await run(expression);
-      if (value) return value;
-    } catch (error) {
-      last = error.message;
-    }
-    await wait(500);
-  }
-  if (last) say(`    последняя ошибка: ${last}`);
-  return null;
-}
-
-/** Настоящее нажатие мышью по элементу с таким текстом. */
-async function clickText(text, tag = "*") {
-  const box = await run(`
-    (() => {
-      const nodes = [...document.querySelectorAll(${JSON.stringify(tag)})];
-      const found = nodes.reverse().find((n) => n.textContent.trim() === ${JSON.stringify(text)});
-      if (!found) return null;
-      const b = found.getBoundingClientRect();
-      return JSON.stringify({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) });
-    })()
-  `);
-  if (!box) return false;
-  const point = JSON.parse(box);
-  await cdp("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
-  await cdp("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
-  await wait(700);
-  return true;
-}
-
-async function clickSelector(selector) {
-  const box = await run(`
-    (() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) return null;
-      const b = el.getBoundingClientRect();
-      return JSON.stringify({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) });
-    })()
-  `);
-  if (!box) return false;
-  const point = JSON.parse(box);
-  await cdp("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
-  await cdp("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
-  await wait(700);
-  return true;
-}
-
-/* ── Проверка ────────────────────────────────────────────────────── */
-
-async function main() {
-  say("\n=== Готовим настоящий Chrome ===");
-  const target = await startChrome();
-  await connect(target);
-  await cdp("Runtime.enable");
-  say("  Chrome под управлением");
-
-  // Разрешение на уведомления выдаём через протокол: обычное окно
-  // «разрешить?» нажать некому, а спрашивать его наш код обязан —
-  // и спросит, просто получит готовый ответ.
-  await cdp("Browser.grantPermissions", {
-    origin: SITE,
-    permissions: ["notifications"],
-  }).catch(() => undefined);
-
-  say("\n=== Вход ===");
-  const logged = await run(`
-    fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ login: ${JSON.stringify(A)}, password: ${JSON.stringify(PASS)} }),
-    }).then((r) => r.json()).then((d) => Boolean(d.accessToken))
-  `);
+  await pilot.webContents.executeJavaScript(войтиВСтранице(A, PASS));
   ok("вошли в Chrome", logged);
 
   await cdp("Page.enable").catch(() => undefined);
@@ -307,12 +181,7 @@ async function main() {
 async function sendAsB() {
   const text = `Проверка уведомления ${Math.round(Date.now() / 1000) % 100000}`;
 
-  const login = await fetch(`${SITE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login: B, password: PASS }),
-  });
-  const { accessToken } = await login.json();
+  const accessToken = await войтиСнаружи(SITE, B, PASS);
   if (!accessToken) return { ok: false, text };
 
   const dms = await fetch(`${SITE}/api/dms`, {

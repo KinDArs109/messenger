@@ -27,6 +27,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { execFile, execFileSync, spawn } = require("node:child_process");
 const { runningProcesses } = require("../games.cjs");
+const { войтиВСтранице, войтиСнаружи } = require("./login.cjs");
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
@@ -159,14 +160,7 @@ async function openFor(who, partition, x, withBridge) {
 
   await win.loadURL(`${SITE}/?app`);
 
-  const logged = await win.webContents.executeJavaScript(`
-    fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ login: ${JSON.stringify(who)}, password: ${JSON.stringify(PASS)} }),
-    }).then((r) => r.json()).then((d) => Boolean(d.accessToken))
-  `);
+  const logged = await win.webContents.executeJavaScript(войтиВСтранице(who, PASS));
   if (!logged) throw new Error(`не удалось войти как ${who}`);
 
   await win.loadURL(`${SITE}/?app`);

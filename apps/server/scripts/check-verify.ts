@@ -3,6 +3,7 @@ import { io } from "socket.io-client";
 import { PrismaClient } from "@prisma/client";
 import { ulid } from "ulid";
 import { hashPassword } from "../src/lib/password.js";
+import { войти as общийВход } from "./login.js";
 
 /**
  * Проверка заставы: без подтверждённой почты внутрь не пускают.
@@ -82,12 +83,10 @@ function сокет(token: string): Promise<{ впустили: boolean; при�
   });
 }
 
-async function войти(login: string): Promise<string> {
-  const res = await запрос("/auth/login", { body: { login, password: PASSWORD } });
-  const token = res.body.accessToken;
-  if (typeof token !== "string") throw new Error(`Не удалось войти как ${login}: ${res.status}`);
-  return token;
-}
+// Вход теперь в два шага: пароль, потом код из письма. Второй шаг
+// берёт на себя общий помощник — писем проверка не читает, зато
+// у неё есть база, и она кладёт туда известный себе код.
+const войтиКак = (login: string): Promise<string> => общийВход(URL, prisma, login, PASSWORD);
 
 /** Заводим человека с готовым кодом на руках.
  *
@@ -151,7 +150,20 @@ async function main() {
   const почта = await завести("novichok", "Новичок", false);
   const чужая = await завести("sosed", "Сосед", true);
 
-  const token = await войти(почта);
+  const token = await войтиКак(почта);
+
+  /*
+   * Вход теперь сам подтверждает почту — и правильно делает: человек
+   * только что достал код из своего ящика, доказательство прямее
+   * некуда. Но заставу мы проверяем не на нём, а на том, кто до входа
+   * ещё не добрался: зарегистрировался, получил сессию сразу — и сидит
+   * с неподтверждённым адресом.
+   *
+   * Поэтому возвращаем отметку обратно. Сделать это надо до первого
+   * же запроса внутрь: сервер помнит, кого проверял, и «подтверждён»
+   * он запомнил бы навсегда.
+   */
+  await prisma.user.update({ where: { email: почта }, data: { emailVerifiedAt: null } });
 
   // 1. Двери заперты.
   const внутрь = await запрос("/servers", { token });

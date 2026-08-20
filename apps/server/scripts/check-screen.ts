@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { ulid } from "ulid";
 import { io, type Socket } from "socket.io-client";
 import { hashPassword } from "../src/lib/password.js";
+import { войти } from "./login.js";
 
 /**
  * Проверка показа экрана — служебной его части.
@@ -61,17 +62,10 @@ function connect(token: string): Promise<Socket> {
   });
 }
 
-async function login(who: string): Promise<string> {
-  // Поле называется login, а не email: входить можно и по имени
-  // пользователя, и сервер различает их по наличию собаки.
-  const res = await fetch(`${URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login: who, password: PASSWORD }),
-  });
-  if (!res.ok) throw new Error(`Вход как ${who}: HTTP ${res.status} ${await res.text()}`);
-  return ((await res.json()) as { accessToken: string }).accessToken;
-}
+// Входить можно и по почте, и по имени пользователя — сервер
+// различает их по наличию собаки. Второй шаг (код из письма)
+// берёт на себя общий помощник.
+const login = (who: string): Promise<string> => войти(URL, prisma, who, PASSWORD);
 
 async function main(): Promise<void> {
   console.log(`\nПроверка показа экрана — ${URL}\n`);

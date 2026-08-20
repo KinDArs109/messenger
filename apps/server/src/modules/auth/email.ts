@@ -53,7 +53,19 @@ export async function issueEmailCode(userId: string, force = false): Promise<boo
     },
   });
 
-  return sendVerificationCode(user.email, code);
+  /*
+   * Письмо уходит, но ответа мы не ждём — по той же причине, что
+   * и код на вход. Ждали — и запрос застревал ровно настолько,
+   * насколько задумывался почтовый сервер: на живом адресе доли
+   * секунды, на недоступном — десятки. Код уже выдан и лежит в базе,
+   * письмо его догонит; осечка видна в журнале и по кнопке
+   * «отправить ещё раз».
+   */
+  void sendVerificationCode(user.email, code).catch((error: unknown) =>
+    console.error("Не удалось отправить код подтверждения:", error),
+  );
+
+  return true;
 }
 
 export async function verifyEmailCode(userId: string, code: string): Promise<Date> {

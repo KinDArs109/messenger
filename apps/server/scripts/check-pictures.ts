@@ -8,6 +8,7 @@ import { io, type Socket } from "socket.io-client";
 import { hashPassword } from "../src/lib/password.js";
 import { UPLOADS_DIR } from "../src/lib/storage.js";
 import { pictureKeysInUse } from "../src/lib/pictures.js";
+import { войти } from "./login.js";
 
 /**
  * Проверка аватаров и настроек сервера.
@@ -33,15 +34,10 @@ const fail = (s: string) => {
   failed = true;
 };
 
-async function login(who: string): Promise<string> {
-  const res = await fetch(`${URL_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login: who, password: PASSWORD }),
-  });
-  if (!res.ok) throw new Error(`Вход как ${who}: HTTP ${res.status}`);
-  return ((await res.json()) as { accessToken: string }).accessToken;
-}
+// Вход теперь в два шага: пароль, потом код из письма. Писем
+// проверка не читает — за неё это делает общий помощник, которому
+// доступна база.
+const login = (who: string): Promise<string> => войти(URL_BASE, prisma, who, PASSWORD);
 
 function auth(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` };

@@ -13,6 +13,7 @@
 // поднимать их до четверых ради одного раздела значит замедлить всё.
 
 const { app, BrowserWindow, session } = require("electron");
+const { войтиВСтранице, войтиСнаружи } = require("./login.cjs");
 
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 app.on("window-all-closed", () => undefined);
@@ -45,9 +46,11 @@ async function запрос(token, path, options = {}) {
 }
 
 async function войти(login) {
-  const r = await запрос(null, "/auth/login", { method: "POST", body: { login, password: PASS } });
-  if (!r.ok) throw new Error(`не вошёл как ${login}: ${r.status}`);
-  return r.data.accessToken;
+  // Вход в два шага: пароль, потом код из письма. Код кладут заранее,
+  // командой db:login-code — см. login.cjs.
+  const token = await войтиСнаружи(SITE, login, PASS);
+  if (!token) throw new Error(`не вошёл как ${login}`);
+  return token;
 }
 
 /** Картинка эмодзи — маленький PNG прямо здесь, чтобы проверке
@@ -144,11 +147,7 @@ void app.whenReady().then(async () => {
     webPreferences: { session: ses, backgroundThrottling: false },
   });
   await win.loadURL(`${SITE}/?app`);
-  await win.webContents.executeJavaScript(`
-    fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
-      credentials: "include", body: JSON.stringify({ login: "call-check-b", password: ${JSON.stringify(PASS)} }) })
-      .then((r) => r.json()).then((d) => Boolean(d.accessToken))
-  `);
+  await win.webContents.executeJavaScript(войтиВСтранице("call-check-b", PASS));
   await win.loadURL(`${SITE}/?app`);
   await wait(3500);
 

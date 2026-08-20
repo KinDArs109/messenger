@@ -8,6 +8,8 @@ import {
   totpEnableSchema,
   emailCodeSchema,
   changeEmailSchema,
+  loginConfirmSchema,
+  loginResendSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
 } from "@messenger/shared";
@@ -68,18 +70,64 @@ authRouter.post(
   },
 );
 
+/**
+ * Вход — в два шага, и первый из них сессии не даёт.
+ *
+ * Пока почта на сервере не настроена, шаг один: сервер сразу отвечает
+ * сессией, как раньше. Клиент различает ответы по полю pending —
+ * ему не нужно знать, настроена ли почта.
+ */
+function ответНаВход(res: Parameters<typeof setRefreshCookie>[0], результат: unknown) {
+  const итог = результат as { refreshToken?: string; pending?: string };
+  // Первый шаг: сессии ещё нет, ставить cookie нечем и незачем.
+  if (итог.pending) {
+    res.json(итог);
+    return;
+  }
+  const { refreshToken, ...остальное } = итог as { refreshToken: string };
+  setRefreshCookie(res, refreshToken);
+  res.json(остальное);
+}
+
 authRouter.post(
   "/login",
   authLimiter,
   validateBody(loginSchema),
   async (req, res) => {
-    const { refreshToken, ...result } = await authService.login(
-      req.body,
+    ответНаВход(
+      res,
+      await authService.login(req.body, req.headers["user-agent"], clientOf(req)),
+    );
+  },
+);
+
+/** Второй шаг: код из письма. Здесь и появляется сессия. */
+authRouter.post(
+  "/login/confirm",
+  authLimiter,
+  validateBody(loginConfirmSchema),
+  async (req, res) => {
+    const { ticket, code } = req.body as { ticket: string; code: string };
+    const { refreshToken, ...result } = await authService.finishLogin(
+      ticket,
+      code,
       req.headers["user-agent"],
       clientOf(req),
     );
     setRefreshCookie(res, refreshToken);
     res.json(result);
+  },
+);
+
+/** Письмо не дошло. Пароль заново не спрашиваем: пропуск с первого
+ *  шага ещё действует, и он же ограничивает, кому слать. */
+authRouter.post(
+  "/login/resend",
+  authLimiter,
+  validateBody(loginResendSchema),
+  async (req, res) => {
+    const { ticket } = req.body as { ticket: string };
+    res.json({ ...(await authService.resendLoginCode(ticket)), mailEnabled: isMailEnabled() });
   },
 );
 
@@ -212,13 +260,10 @@ authRouter.post(
   authLimiter,
   validateBody(loginCodeSchema),
   async (req, res) => {
-    const { refreshToken, ...result } = await authService.loginWithCode(
-      req.body,
-      req.headers["user-agent"],
-      clientOf(req),
+    ответНаВход(
+      res,
+      await authService.loginWithCode(req.body, req.headers["user-agent"], clientOf(req)),
     );
-    setRefreshCookie(res, refreshToken);
-    res.json(result);
   },
 );
 

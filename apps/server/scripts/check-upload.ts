@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { ulid } from "ulid";
 import sharp from "sharp";
 import { hashPassword } from "../src/lib/password.js";
+import { войти } from "./login.js";
 
 /**
  * Сквозная проверка загрузки картинки.
@@ -43,13 +44,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    const login = await fetch(`${URL_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login: user.email, password: PASSWORD }),
-    });
-    if (!login.ok) throw new Error(`вход: HTTP ${login.status}`);
-    const { accessToken } = (await login.json()) as { accessToken: string };
+    const accessToken = await войти(URL_BASE, prisma, user.email, PASSWORD);
     const auth = { Authorization: `Bearer ${accessToken}` };
 
     // Скриншотоподобный PNG — худший случай для WebP.

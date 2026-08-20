@@ -33,6 +33,46 @@ export async function verifyAccessToken(
 ): Promise<string | null> {
   try {
     const { payload } = await jwtVerify(token, secret, { issuer: ISSUER });
+    // Пропуск на второй шаг входа подписан тем же ключом, но помечен
+    // получателем. Без этой проверки его можно было бы предъявить
+    // вместо access-токена — то есть войти, не вводя код из письма.
+    if (payload.aud) return null;
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Пропуск на второй шаг входа.
+ *
+ * Пароль уже проверен, но сессии ещё нет: сначала код из письма.
+ * Пропуск говорит второму шагу, чей это вход, и делает это так, чтобы
+ * клиент не мог подставить чужого: подпись наша, срок короткий.
+ *
+ * Отдельный получатель («login») — не украшение. Он не даёт
+ * предъявить пропуск вместо access-токена и попасть внутрь, минуя
+ * письмо: проверка access-токенов такие подписи отвергает.
+ */
+export async function signLoginTicket(userId: string): Promise<string> {
+  return new SignJWT({})
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuer(ISSUER)
+    .setAudience("login")
+    .setIssuedAt()
+    // Столько же, сколько живёт код: пропуск без кода бесполезен,
+    // а код без пропуска не принимается.
+    .setExpirationTime("15m")
+    .sign(secret);
+}
+
+export async function verifyLoginTicket(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, secret, {
+      issuer: ISSUER,
+      audience: "login",
+    });
     return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;
