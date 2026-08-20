@@ -16,7 +16,9 @@
     "check:emoji": "electron scripts/check-emoji.cjs",
     "check:voice-message": "electron scripts/check-voice-message.cjs",
     "check:steam": "electron scripts/check-steam.cjs",
-    "check:screens": "electron scripts/check-screens.cjs"
+    "check:screens": "electron scripts/check-screens.cjs",
+    "check:poison": "electron scripts/check-poison.cjs",
+    "check:undressed": "electron scripts/check-undressed.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",
