@@ -251,14 +251,18 @@ export function Composer({
             e.target.value = "";
           }}
         />
-        <button
-          onClick={() => picker.current?.click()}
-          title="Прикрепить файл"
-          aria-label="Прикрепить файл"
-          className="px-2 py-2.5 text-muted hover:text-body"
-        >
-          <Plus className="size-6" />
-        </button>
+        {/* Обёртка ростом со строку: кнопка встаёт по её середине,
+            а не по нижнему краю ряда — см. пояснение ниже, у правых. */}
+        <span className="flex h-12 shrink-0 items-center">
+          <button
+            onClick={() => picker.current?.click()}
+            title="Прикрепить файл"
+            aria-label="Прикрепить файл"
+            className="px-2 py-2 text-muted hover:text-body"
+          >
+            <Plus className="size-6" />
+          </button>
+        </span>
 
         <textarea
           ref={area}
@@ -273,28 +277,37 @@ export function Composer({
           className="max-h-80 flex-1 resize-none bg-transparent py-3 text-body outline-none placeholder:text-faint"
         />
 
-        {left < 200 && (
-          <span className={`py-3 text-xs ${left < 0 ? "text-danger" : "text-muted"}`}>{left}</span>
-        )}
+        {/* Ряд прижат к нижнему краю намеренно: когда текст вырастает
+            на несколько строк, кнопки должны остаться внизу, у последней.
+            Но «низ ряда» — это ниже середины буквы на величину отступа
+            поля, и кнопки разной высоты вставали от него лесенкой,
+            каждая на свою величину. Обёртка ростом со строку прижимается
+            к низу сама, а кнопки внутри стоят по её середине — то есть
+            по середине последней строки, все на одной высоте. */}
+        <div className="flex h-12 shrink-0 items-center gap-1 md:gap-3">
+          {left < 200 && (
+            <span className={`text-xs ${left < 0 ? "text-danger" : "text-muted"}`}>{left}</span>
+          )}
 
-        {/* Свои эмодзи — рядом с отправкой, как в дискорде: их выбирают
-            в конце фразы, а не в начале. */}
-        <EmojiPicker onPick={insertEmoji} />
+          {/* Свои эмодзи — рядом с отправкой, как в дискорде: их выбирают
+              в конце фразы, а не в начале. */}
+          <EmojiPicker onPick={insertEmoji} />
 
-        {/* Голосовое уходит само, отдельным сообщением: дописывать
-            к записи текст никто не станет, а лишний шаг «теперь нажми
-            отправить» превращает быстрое действие в медленное. */}
-        <VoiceRecorder onSend={(attachment) => void sendVoice(attachment)} onError={setError} />
+          {/* Голосовое уходит само, отдельным сообщением: дописывать
+              к записи текст никто не станет, а лишний шаг «теперь нажми
+              отправить» превращает быстрое действие в медленное. */}
+          <VoiceRecorder onSend={(attachment) => void sendVoice(attachment)} onError={setError} />
 
-        <button
-          onClick={() => void send()}
-          disabled={!canSend}
-          title="Отправить"
-          aria-label="Отправить"
-          className="px-3 py-2.5 text-muted hover:text-body disabled:opacity-40 md:px-2"
-        >
-          <SendHorizontal className="size-5" />
-        </button>
+          <button
+            onClick={() => void send()}
+            disabled={!canSend}
+            title="Отправить"
+            aria-label="Отправить"
+            className="rounded p-2 text-muted hover:bg-hover hover:text-body disabled:opacity-40"
+          >
+            <SendHorizontal className="size-5" />
+          </button>
+        </div>
       </div>
     </div>
   );
