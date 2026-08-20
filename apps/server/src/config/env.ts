@@ -48,6 +48,13 @@ const envSchema = z.object({
   // открытой дверью.
   ADMIN_USERNAME: z.string().optional(),
 
+  // Бот сторожа: им же приходит код на вход в хозяйскую панель
+  // и сообщение о каждой попытке в неё войти. Пока не задан,
+  // панель закрыта — и это намеренно: панель, о входе в которую
+  // хозяин не узнаёт, ему не нужна.
+  TELEGRAM_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT: z.string().optional(),
+
   // Чужой ретранслятор, если когда-нибудь появится платный.
   TURN_URL: blank(z.string()),
   TURN_USER: blank(z.string()),

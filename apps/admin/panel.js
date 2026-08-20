@@ -18,6 +18,7 @@ const АДРЕС =
 
 let токен = null;
 let пропуск = null; // между шагами входа
+let дверь = null; // пропуск второй двери — код из Телеграма
 let данные = null;
 let вСети = new Set();
 
@@ -35,6 +36,9 @@ async function запрос(путь, настройки = {}) {
     headers: {
       ...(настройки.body ? { "Content-Type": "application/json" } : {}),
       ...(токен ? { Authorization: `Bearer ${токен}` } : {}),
+      // Вторая дверь: без этого пропуска хозяйский раздел
+      // притворяется несуществующим даже для хозяина.
+      ...(дверь ? { "X-Admin": дверь } : {}),
     },
     body: настройки.body ? JSON.stringify(настройки.body) : undefined,
   });
@@ -68,7 +72,7 @@ function показатьВход(ошибка) {
       });
       if (ответ.accessToken) {
         токен = ответ.accessToken;
-        await открыть();
+        await спроситьТелеграм();
         return;
       }
       пропуск = ответ.ticket;
@@ -79,8 +83,15 @@ function показатьВход(ошибка) {
   };
 
   document.getElementById("войти").onclick = войти;
-  document.getElementById("пароль").onkeydown = (e) =>
-    e.key === "Enter" && войти();
+  // Скобки обязательны: стрелка без них вернула бы false на любой
+  // клавише, кроме Enter, а false из onkeydown отменяет ввод —
+  // поле переставало принимать буквы вообще.
+  document.getElementById("пароль").onkeydown = (e) => {
+    if (e.key === "Enter") войти();
+  };
+  document.getElementById("логин").onkeydown = (e) => {
+    if (e.key === "Enter") document.getElementById("пароль").focus();
+  };
   document.getElementById("логин").focus();
 }
 
@@ -107,17 +118,72 @@ function показатьКод(адрес, ошибка) {
         body: { ticket: пропуск, code: код },
       });
       токен = ответ.accessToken;
-      await открыть();
+      await спроситьТелеграм();
     } catch (беда) {
       показатьКод(адрес, беда.message);
     }
   };
 
   document.getElementById("подтвердить").onclick = подтвердить;
-  document.getElementById("код").onkeydown = (e) =>
-    e.key === "Enter" && подтвердить();
+  document.getElementById("код").onkeydown = (e) => {
+    if (e.key === "Enter") подтвердить();
+  };
   document.getElementById("назад").onclick = () => показатьВход();
   document.getElementById("код").focus();
+}
+
+/* ── Вторая дверь: код в Телеграме ─────────────────────────────── */
+
+/**
+ * Пароль и почта открывают мессенджер, но не хозяйство.
+ *
+ * Ящик — вещь, которую теряют вместе с телефоном, а здесь лежат почты
+ * всех до единого и кнопка «удалить человека». Поэтому второй код
+ * приходит в другое место, тем же ботом, что и тревоги сторожа.
+ * И главное: хозяин узнаёт о любой попытке войти в ту же секунду.
+ */
+async function спроситьТелеграм(ошибка) {
+  let билет = null;
+  try {
+    билет = (await запрос("/admin/session", { method: "POST" })).ticket;
+  } catch (беда) {
+    показатьВход(беда.message);
+    return;
+  }
+
+  корень.innerHTML = `
+    <div class="вход">
+      <h1 style="margin:0 0 4px;font-size:19px;color:var(--ярко)">Код из Телеграма</h1>
+      <p class="тускло" style="margin:0 0 22px">Прислал бот сторожа. Действует пять минут.</p>
+      ${ошибка ? `<div class="ошибка">${экранируй(ошибка)}</div>` : ""}
+      <label>Шесть цифр
+        <input id="тг" inputmode="numeric" maxlength="6"
+               style="text-align:center;letter-spacing:.45em;font-size:21px" />
+      </label>
+      <button class="главная" id="открыть" style="width:100%">Открыть</button>
+    </div>`;
+
+  const открыть2 = async () => {
+    const код = document.getElementById("тг").value.trim();
+    if (код.length !== 6) return;
+    try {
+      const ответ = await запрос("/admin/session/confirm", {
+        method: "POST",
+        body: { ticket: билет, code: код },
+      });
+      дверь = ответ.token;
+      await открыть();
+    } catch (беда) {
+      // Код сгорел или кончились попытки — начинаем заново, с новым.
+      await спроситьТелеграм(беда.message);
+    }
+  };
+
+  document.getElementById("открыть").onclick = открыть2;
+  document.getElementById("тг").onkeydown = (e) => {
+    if (e.key === "Enter") открыть2();
+  };
+  document.getElementById("тг").focus();
 }
 
 /* ── Хозяйство ─────────────────────────────────────────────────── */
@@ -215,6 +281,7 @@ function нарисовать(сообщение) {
           Регистрация: ${регистрация.поКоду ? "по приглашению" : "открыта всем"}
         </span>
         <button id="обновить" class="мелкая">Обновить</button>
+        <button id="закрыть" class="мелкая">Закрыть</button>
       </span>
     </header>
 
@@ -336,6 +403,16 @@ function приглашение(и) {
 
 function повеситьРучки() {
   document.getElementById("обновить").onclick = () => открыть();
+  document.getElementById("закрыть").onclick = async () => {
+    // Дверь закрывается и на сервере: иначе пропуск жил бы полчаса
+    // после того, как панель убрали с глаз.
+    await запрос("/admin/session/close", { method: "POST" }).catch(
+      () => undefined,
+    );
+    дверь = null;
+    токен = null;
+    показатьВход();
+  };
 
   const каждой = (признак, дело) => {
     for (const кнопка of document.querySelectorAll(`[data-${признак}]`)) {

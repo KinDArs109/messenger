@@ -86,8 +86,36 @@ async function rejoinVoice(socket: AppSocket): Promise<void> {
   const session = currentSession();
   if (!channelId || !session) return;
 
-  const ok = await socket.emitWithAck("voice:join", { channelId });
-  if (!ok) return;
+  /*
+   * Возвращаемся в разговор настойчиво, а не один раз.
+   *
+   * Раньше здесь стоял один-единственный запрос без срока ожидания.
+   * Если ответ не приходил — а после обрыва связи первые секунды
+   * самые ненадёжные, — обещание висело вечно: молча, без ошибки
+   * и без второй попытки. Снаружи это выглядело так, что человек
+   * сидит в разговоре, а его никто не слышит и в составе канала
+   * его нет; помогал только выход и вход заново.
+   *
+   * Теперь три попытки со сроком: сеть после обрыва обычно приходит
+   * в себя за секунду-другую.
+   */
+  let ok = false;
+  for (let попытка = 1; попытка <= 3 && !ok; попытка += 1) {
+    try {
+      ok = await socket.timeout(6000).emitWithAck("voice:join", { channelId });
+    } catch {
+      ok = false;
+    }
+    if (!ok) await new Promise((готово) => setTimeout(готово, попытка * 700));
+  }
+
+  if (!ok) {
+    // Молчать нельзя: человек уверен, что он в разговоре.
+    console.error("Не удалось вернуться в разговор после обрыва связи");
+    useStore.getState().setVoiceRejoinFailed(true);
+    return;
+  }
+  useStore.getState().setVoiceRejoinFailed(false);
 
   socket.emit("voice:state", { muted: store.voiceMuted, deafened: store.voiceDeafened });
   if (session.isSharing("screen")) {
@@ -209,6 +237,7 @@ function Messenger({ offline }: { offline: boolean }) {
   const serverId = useStore((s) => s.serverId);
   const channelId = useStore((s) => s.channelId);
   const connected = useStore((s) => s.connected);
+  const rejoinFailed = useStore((s) => s.voiceRejoinFailed);
   const loading = useStore((s) => s.loading);
   const friendsOpen = useStore((s) => s.friendsOpen);
   const phone = useIsPhone();
@@ -663,6 +692,23 @@ function Messenger({ offline }: { offline: boolean }) {
             <RefreshCw className="size-4" />
             Вышло обновление — нажмите, чтобы применить
           </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* Связь вернулась, а в разговор не пустило. Молчать тут нельзя:
+          человек уверен, что сидит в канале, а его там нет — его
+          не слышно, и он об этом узнаёт последним. */}
+      <AnimatePresence>
+        {rejoinFailed && (
+          <motion.div
+            role="status"
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            className="fixed bottom-[max(4.5rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-lg bg-idle px-4 py-2 text-center text-sm text-black shadow-lg"
+          >
+            Не удалось вернуться в разговор — нажмите канал ещё раз
+          </motion.div>
         )}
       </AnimatePresence>
 

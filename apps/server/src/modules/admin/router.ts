@@ -5,6 +5,14 @@ import { newInviteCode } from "../../lib/ids.js";
 import { badRequest, notFound } from "../../lib/errors.js";
 import { ктоВСети } from "../../realtime/index.js";
 import { currentUserId, requireAuth } from "../../middleware/auth.js";
+import {
+  закрытьДверь,
+  попроситьКод,
+  принятьКод,
+  требуетсяДверь,
+  хозяин,
+  чужойСтучал,
+} from "./gate.js";
 
 /**
  * Хозяйская часть: то, за чем раньше приходилось лезть в базу руками.
@@ -26,24 +34,18 @@ import { currentUserId, requireAuth } from "../../middleware/auth.js";
 
 export const adminRouter: Router = Router();
 
-/** Хозяин — один, и он назван в .env. Сравниваем по имени
- *  пользователя, а не по идентификатору: имя человек знает и может
- *  вписать сам, а идентификатор надо где-то подсмотреть. */
+/** Хозяин ли это. Именно «не найдено», а не «нельзя»: чужому незачем
+ *  знать, что такой раздел вообще существует. */
 async function требуетсяХозяин(userId: string): Promise<void> {
-  if (!env.ADMIN_USERNAME) throw notFound("Раздел не включён");
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { username: true },
-  });
-
-  if (!user || user.username !== env.ADMIN_USERNAME) {
-    // Именно «не найдено», а не «нельзя»: чужому незачем знать,
-    // что такой раздел вообще существует.
+  if (!(await хозяин(userId))) {
+    чужойСтучал();
     throw notFound("Раздел не найден");
   }
 }
 
+// Первая дверь — обычный вход в мессенджер, и она общая для всего
+// раздела. Дальше два разных пути: получить код в Телеграм можно,
+// пройдя только её, а всё остальное требует ещё и второй.
 adminRouter.use(requireAuth, async (req, _res, next) => {
   try {
     await требуетсяХозяин(currentUserId(req));
@@ -52,6 +54,38 @@ adminRouter.use(requireAuth, async (req, _res, next) => {
     next(error);
   }
 });
+
+/**
+ * Вторая дверь: код, который приходит в Телеграм тем же ботом,
+ * что и тревоги сторожа.
+ *
+ * Смысл не только в том, что чужому нужен ещё и Телеграм. Смысл
+ * в том, что хозяин узнаёт о любой попытке войти в ту же секунду —
+ * даже о своей, а значит, и о чужой.
+ */
+adminRouter.post("/session", async (req, res) => {
+  res.json(await попроситьКод(currentUserId(req)));
+});
+
+adminRouter.post("/session/confirm", (req, res) => {
+  const { ticket, code } = req.body as { ticket?: string; code?: string };
+  if (
+    typeof ticket !== "string" ||
+    !/^\d{6}$/.test(String(code ?? "").trim())
+  ) {
+    throw badRequest("BAD_INPUT", "Нужен пропуск и шесть цифр");
+  }
+  res.json(принятьКод(ticket, String(code)));
+});
+
+adminRouter.post("/session/close", (req, res) => {
+  const пропуск = req.headers["x-admin"];
+  if (typeof пропуск === "string") закрытьДверь(пропуск);
+  res.status(204).end();
+});
+
+// Всё, что ниже, — только со второй дверью.
+adminRouter.use(требуетсяДверь);
 
 /** Всё хозяйство одним ответом: панель маленькая, и делить её на пять
  *  запросов значит показывать её кусками. */
@@ -67,7 +101,9 @@ adminRouter.get("/overview", async (_req, res) => {
         emailVerifiedAt: true,
         createdAt: true,
         totpEnabledAt: true,
-        _count: { select: { messages: true, ownedServers: true, memberships: true } },
+        _count: {
+          select: { messages: true, ownedServers: true, memberships: true },
+        },
         // Последний живой вход: по нему видно, кто пользуется,
         // а кто завёл запись и пропал.
         refreshTokens: {
@@ -212,7 +248,10 @@ adminRouter.delete("/servers/:id", async (req, res) => {
 
   const сервер = await prisma.server.findUnique({
     where: { id },
-    select: { name: true, _count: { select: { members: true, channels: true } } },
+    select: {
+      name: true,
+      _count: { select: { members: true, channels: true } },
+    },
   });
   if (!сервер) throw notFound("Такого сервера нет");
 
@@ -230,7 +269,11 @@ adminRouter.delete("/servers/:id", async (req, res) => {
 /** Выпустить приглашение — то же, что кнопка в мессенджере, но
  *  не требует заходить в мессенджер. */
 adminRouter.post("/invites", async (req, res) => {
-  const { serverId, дней = 7, входов = 5 } = req.body as {
+  const {
+    serverId,
+    дней = 7,
+    входов = 5,
+  } = req.body as {
     serverId?: string;
     дней?: number;
     входов?: number;
@@ -262,7 +305,10 @@ adminRouter.post("/invites", async (req, res) => {
  *  работать в ту же секунду. */
 adminRouter.delete("/invites/:code", async (req, res) => {
   const code = String(req.params.code).toLowerCase();
-  const было = await prisma.invite.findUnique({ where: { code }, select: { code: true } });
+  const было = await prisma.invite.findUnique({
+    where: { code },
+    select: { code: true },
+  });
   if (!было) throw notFound("Такого приглашения нет");
 
   await prisma.invite.delete({ where: { code } });

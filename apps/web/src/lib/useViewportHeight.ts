@@ -18,9 +18,35 @@ export function useViewportHeight(): void {
     const viewport = window.visualViewport;
     if (!viewport) return;
 
+    /*
+     * Высоту в переменную ставим только тогда, когда открыта
+     * клавиатура. Всё остальное время её вообще не должно быть:
+     * пусть работает dvh — это собственная правда браузера про то,
+     * сколько места он оставил странице.
+     *
+     * Раньше переменная ставилась всегда, и она же оказывалась
+     * ловушкой: событие о закрытии клавиатуры телефон присылает
+     * не всегда и не сразу, а иногда не присылает вовсе. Тогда
+     * в переменной оставалась «высота с клавиатурой» — и мессенджер
+     * так и висел на две трети экрана, с огромной пустотой внизу.
+     *
+     * Клавиатуру узнаём по разнице: видимая часть заметно меньше
+     * окна. Порог в пятнадцать процентов не спутать ни с адресной
+     * строкой, ни с полосой жестов — те отнимают куда меньше.
+     */
     function apply() {
       if (!viewport) return;
-      document.documentElement.style.setProperty("--app-height", `${viewport.height}px`);
+
+      const видно = viewport.height;
+      const окно = window.innerHeight || видно;
+      const клавиатура = окно - видно > окно * 0.15;
+
+      if (клавиатура) {
+        document.documentElement.style.setProperty("--app-height", `${видно}px`);
+      } else {
+        document.documentElement.style.removeProperty("--app-height");
+      }
+
       // Safari вдобавок прокручивает саму страницу, чтобы показать
       // поле ввода, — и шапка канала уезжает за верхний край.
       // Раз высота теперь верная, прокручивать нечего.
@@ -35,11 +61,17 @@ export function useViewportHeight(): void {
     // означает «размер изменился»; лишний пересчёт стоит одну строчку.
     window.addEventListener("resize", apply);
     window.addEventListener("orientationchange", apply);
+    // Клавиатура уходит вместе с фокусом, но событие о размере
+    // за ней поспевает не всегда — пересчитаем сами.
+    window.addEventListener("focusout", apply);
+    document.addEventListener("visibilitychange", apply);
 
     return () => {
       viewport.removeEventListener("resize", apply);
       window.removeEventListener("resize", apply);
       window.removeEventListener("orientationchange", apply);
+      window.removeEventListener("focusout", apply);
+      document.removeEventListener("visibilitychange", apply);
       document.documentElement.style.removeProperty("--app-height");
     };
   }, []);

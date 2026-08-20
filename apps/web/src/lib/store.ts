@@ -246,6 +246,10 @@ interface State {
   }) => void;
 
   setConnected: (connected: boolean) => void;
+  /** Связь вернулась, а в разговор не пустило. Человеку об этом надо
+   *  сказать: он уверен, что сидит в канале, а его там нет. */
+  voiceRejoinFailed: boolean;
+  setVoiceRejoinFailed: (плохо: boolean) => void;
   markTyping: (userId: string) => void;
   sweepTyping: () => void;
 
@@ -718,6 +722,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setConnected: (connected) => set({ connected }),
+  voiceRejoinFailed: false,
+  setVoiceRejoinFailed: (плохо) => set({ voiceRejoinFailed: плохо }),
 
   markTyping: (userId) => {
     const typing = new Map(get().typing);
