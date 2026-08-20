@@ -8,6 +8,7 @@ import type {
 import { CHOSEN_STATUSES, room, type ChosenStatus } from "@messenger/shared";
 import { env } from "../config/env.js";
 import { verifyAccessToken } from "../lib/tokens.js";
+import { hasVerifiedEmail } from "../middleware/verified.js";
 import { prisma } from "../db/client.js";
 import { leaveVoice, registerVoiceHandlers, sendVoiceSnapshot } from "./voice.js";
 import { setQuiet } from "./quiet.js";
@@ -82,6 +83,14 @@ export function createRealtime(httpServer: HttpServer): Realtime {
 
     if (!userId) {
       next(new Error("UNAUTHORIZED"));
+      return;
+    }
+
+    // Та же застава, что и на /api. Без неё она бесполезна: почти всё
+    // живое — сообщения, разговоры, кто в сети — идёт сокетом, а не
+    // запросами, и непроверенный просто зашёл бы с другой стороны.
+    if (!(await hasVerifiedEmail(userId))) {
+      next(new Error("EMAIL_NOT_VERIFIED"));
       return;
     }
 

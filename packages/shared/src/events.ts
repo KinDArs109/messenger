@@ -17,6 +17,9 @@ export interface AttachmentDto {
   thumbUrl: string | null;
   width: number | null;
   height: number | null;
+  /** Секунды — только у голосовых сообщений. Приходит с сервера,
+   *  потому что в самой записи её нет: браузер её туда не кладёт. */
+  duration?: number | null;
 }
 
 /** Короткая выжимка родительского сообщения. Полный объект здесь
@@ -58,6 +61,14 @@ export interface ChannelDto {
   position: number;
 }
 
+/** Своё эмодзи сервера. В сообщении стоит как `:название:`,
+ *  поэтому имя здесь — то самое, что человек пишет. */
+export interface EmojiDto {
+  id: string;
+  name: string;
+  url: string;
+}
+
 export interface ServerDto {
   id: string;
   name: string;
@@ -74,6 +85,10 @@ export interface ServerDto {
   /** Уровень считается из числа бустов. Приезжает готовым, чтобы
    *  клиент и сервер не считали его каждый по-своему. */
   level: number;
+  /** Свои эмодзи — открываются на третьем уровне. Приезжают вместе
+   *  с сервером: они нужны сразу, чтобы нарисовать уже написанные
+   *  сообщения, а не только когда человек полезет их выбирать. */
+  emoji: EmojiDto[];
 }
 
 export interface MemberDto extends PublicUser {
@@ -208,6 +223,10 @@ export interface ServerToClientEvents {
     iconUrl: string | null;
     bannerUrl: string | null;
   }) => void;
+  /** Эмодзи сервера добавили или убрали. Целиком списком: их
+   *  десятки, а не тысячи, и слать по одному ради экономии
+   *  нескольких байт — лишний повод разойтись состояниям. */
+  "server:emoji": (data: { serverId: string; emoji: EmojiDto[] }) => void;
   /** Сервер поддержали — или поддержку сняли. Уровень считает сервер:
    *  два места, считающих одно и то же, однажды посчитают по-разному. */
   "server:boost": (data: {

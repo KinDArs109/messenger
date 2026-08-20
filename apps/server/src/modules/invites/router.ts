@@ -113,6 +113,7 @@ invitesRouter.post("/:code/join", requireAuth, async (req, res) => {
     include: {
       channels: { orderBy: { position: "asc" } },
       boosts: { select: { userId: true } },
+      emoji: { select: { id: true, name: true, url: true }, orderBy: { name: "asc" } },
     },
   });
   const membership = await prisma.serverMember.findUniqueOrThrow({

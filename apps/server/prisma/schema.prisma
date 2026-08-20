@@ -80,6 +80,7 @@ model User {
   bansIssued         Ban[]                @relation("BannedByUser")
   pushDevices        PushDevice[]
   boosts             ServerBoost[]
+  emoji              Emoji[]
 }
 
 /**
@@ -182,8 +183,32 @@ model Server {
   invites  Invite[]
   bans     Ban[]
   boosts   ServerBoost[]
+  emoji    Emoji[]
 
   @@index([ownerId])
+}
+
+/**
+ * Своё эмодзи сервера — награда третьего уровня.
+ *
+ * Имя уникально внутри сервера, а не глобально: в сообщении оно стоит
+ * как `:название:`, и два одинаковых имени на одном сервере означали бы,
+ * что непонятно, какая картинка нарисуется.
+ */
+model Emoji {
+  id        String   @id
+  serverId  String
+  name      String
+  /** Ссылка на нашу же загрузку — та же, что у аватаров. */
+  url       String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  server  Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [id])
+
+  @@unique([serverId, name])
+  @@index([serverId])
 }
 
 /**
@@ -312,6 +337,14 @@ model Attachment {
   mimeType   String
   width      Int?
   height     Int?
+  /** Длительность голосового сообщения в секундах.
+   *
+   *  Хранится, а не считается на месте, из-за известной особенности
+   *  записи в браузере: Chrome пишет webm без длительности в заголовке,
+   *  и проигрыватель показывает «бесконечность», пока не домотает
+   *  запись до конца. Клиент знает длительность в момент записи —
+   *  он её и присылает. */
+  duration   Int?
   createdAt  DateTime @default(now())
 
   message  Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)

@@ -19,6 +19,7 @@ import { LoadFailed } from "@/features/shell/LoadFailed";
 import { TitleBar } from "@/features/shell/TitleBar";
 import { usePreferences } from "@/lib/preferences";
 import {
+  notifyGame,
   notifyMessage,
   notifyVoiceJoin,
   useNotificationClicks,
@@ -33,7 +34,7 @@ import { FriendsPanel } from "@/features/friends/FriendsPanel";
 import { usePlaying } from "@/features/friends/usePlaying";
 import { CallDialog } from "@/features/voice/CallDialog";
 import { useCallEvents } from "@/features/voice/useCalls";
-import { VerifyEmailBanner } from "@/features/auth/VerifyEmailBanner";
+import { VerifyEmailGate } from "@/features/auth/VerifyEmailGate";
 import { currentSession } from "@/lib/voice";
 import { playSound } from "@/lib/sounds";
 import { ChannelSidebar } from "@/features/channels/ChannelSidebar";
@@ -178,6 +179,18 @@ function Routes() {
     })();
   }, []);
 
+  // Отказ «подтвердите почту» может прийти в уже открытую вкладку:
+  // например, требование включили, пока человек сидел в мессенджере.
+  // Тогда вместо потока непонятных ошибок показываем экран с кодом.
+  useEffect(() => {
+    const onUnverified = () => {
+      const me = useStore.getState().me;
+      if (me?.emailVerified) useStore.getState().setMe({ ...me, emailVerified: false });
+    };
+    window.addEventListener("email:unverified", onUnverified);
+    return () => window.removeEventListener("email:unverified", onUnverified);
+  }, []);
+
   if (restoring) return <Splash />;
 
   function leaveInvite() {
@@ -199,6 +212,15 @@ function Routes() {
       />
     );
   }
+
+  // Почта не подтверждена — дальше этого экрана не пускаем, и это
+  // не украшение: сервер отвечает тем же самым отказом на любой запрос
+  // мимо /api/auth. Показать мессенджер здесь значило бы показать
+  // пустые окна и непонятные ошибки.
+  //
+  // Приглашение подождёт: ссылка остаётся в адресной строке и
+  // откроется сразу после подтверждения.
+  if (me && !me.emailVerified) return <VerifyEmailGate />;
 
   if (inviteCode) return <InvitePage code={inviteCode} onDone={leaveInvite} />;
 
@@ -329,6 +351,8 @@ function Messenger({ offline }: { offline: boolean }) {
     });
     socket.on("presence:game", ({ userId, game }) => {
       useStore.getState().setGame(userId, game);
+      // Друг сел за ту же игру, что и мы, — самое время сказать.
+      notifyGame(userId, game);
     });
     socket.on("presence:games", ({ playing }) => {
       useStore.getState().setGames(playing);
@@ -459,6 +483,12 @@ function Messenger({ offline }: { offline: boolean }) {
     // в шапке и в ленте слева у всех участников сразу.
     socket.on("server:update", (patch) => {
       useStore.getState().updateServer(patch);
+    });
+
+    // Эмодзи завели или убрали — список нужен всем сразу: он рисует
+    // уже написанные сообщения, а не только окно выбора.
+    socket.on("server:emoji", (patch) => {
+      useStore.getState().setServerEmoji(patch);
     });
 
     // Сервер поддержали — уровень, значки бустеров и баннер меняются
@@ -615,8 +645,6 @@ function Messenger({ offline }: { offline: boolean }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <VerifyEmailBanner />
-
       {/* Звук чужих показов рисовался здесь отдельным элементом —
           снаружи любого канала, чтобы не пропадал при уходе в чат.
           Теперь его ведёт голосовой слой, и он не зависит от разметки

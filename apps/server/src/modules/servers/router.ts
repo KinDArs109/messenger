@@ -1,6 +1,8 @@
 import { Router } from "express";
 import type { MemberRole } from "@messenger/shared";
 import {
+  EMOJI_LIMIT,
+  EMOJI_NAME,
   boostLevel,
   createChannelSchema,
   createServerSchema,
@@ -15,7 +17,7 @@ import { toPublicUser, toServerDto } from "../../lib/dto.js";
 import { requireMembership, requirePermission } from "../../lib/access.js";
 import { forgetPicture, requireOwnPicture } from "../../lib/pictures.js";
 import { param } from "../../lib/params.js";
-import { forbidden } from "../../lib/errors.js";
+import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { realtime } from "../../realtime/emitter.js";
 
 export const serversRouter: Router = Router();
@@ -32,6 +34,7 @@ serversRouter.get("/", async (req, res) => {
         include: {
           channels: { orderBy: { position: "asc" } },
           boosts: { select: { userId: true } },
+          emoji: { select: { id: true, name: true, url: true }, orderBy: { name: "asc" } },
         },
       },
     },
@@ -201,6 +204,99 @@ async function announceBoosts(serverId: string) {
 
   realtime().to(room.server(serverId)).emit("server:boost", payload);
   return payload;
+}
+
+/**
+ * Свои эмодзи сервера — награда третьего уровня.
+ *
+ * Заводит любой участник, а не только владелец: эмодзи — общая шутка,
+ * а не настройка сервера, и просить разрешения ради картинки странно.
+ * Убрать может тот, кто завёл, — или тот, кому позволено править
+ * сервер: иначе неудачное эмодзи останется навсегда, если автор ушёл.
+ */
+serversRouter.post("/:serverId/emoji", async (req, res) => {
+  const serverId = param(req, "serverId");
+  const userId = currentUserId(req);
+  await requireMembership(userId, serverId);
+
+  const { name, url } = req.body as { name?: string; url?: string };
+  const clean = String(name ?? "").trim().toLowerCase();
+
+  if (!EMOJI_NAME.test(clean)) {
+    throw badRequest(
+      "BAD_NAME",
+      "Имя — латиница, цифры и подчёркивание, от двух до тридцати двух символов",
+    );
+  }
+  if (!url) throw badRequest("NO_IMAGE", "Сначала нужна картинка");
+
+  // Уровень — первым делом, до всего остального. Проверять его здесь,
+  // а не только в интерфейсе, обязательно: кнопку можно не рисовать,
+  // а запрос — прислать.
+  //
+  // И именно первым: сначала стояла проверка картинки, и человек без
+  // уровня получал «картинка не ваша» — ответ про другое, по которому
+  // настоящую причину не угадать. Поймано проверкой.
+  const boosts = await prisma.serverBoost.count({ where: { serverId } });
+  if (boostLevel(boosts) < 3) {
+    throw forbidden("Свои эмодзи открываются на третьем уровне сервера");
+  }
+
+  await requireOwnPicture(userId, url);
+
+  const сколько = await prisma.emoji.count({ where: { serverId } });
+  if (сколько >= EMOJI_LIMIT) {
+    throw badRequest("TOO_MANY", `Больше ${EMOJI_LIMIT} эмодзи на сервер не поместится`);
+  }
+
+  const занято = await prisma.emoji.findUnique({
+    where: { serverId_name: { serverId, name: clean } },
+    select: { id: true },
+  });
+  if (занято) throw badRequest("NAME_TAKEN", "Эмодзи с таким именем уже есть");
+
+  await prisma.emoji.create({
+    data: { id: newId(), serverId, name: clean, url, createdBy: userId },
+  });
+
+  res.status(201).json(await announceEmoji(serverId));
+});
+
+serversRouter.delete("/:serverId/emoji/:emojiId", async (req, res) => {
+  const serverId = param(req, "serverId");
+  const emojiId = param(req, "emojiId");
+  const userId = currentUserId(req);
+  const role = await requireMembership(userId, serverId);
+
+  const emoji = await prisma.emoji.findUnique({
+    where: { id: emojiId },
+    select: { serverId: true, createdBy: true, url: true },
+  });
+  if (!emoji || emoji.serverId !== serverId) throw notFound("Эмодзи не найдено");
+
+  const своё = emoji.createdBy === userId;
+  if (!своё) requirePermission(role, "server:edit");
+
+  await prisma.emoji.delete({ where: { id: emojiId } });
+  // Картинку убираем следом: она больше нигде не показывается,
+  // а лежать сотнями килобайт годами ей незачем.
+  await forgetPicture(emoji.url);
+
+  res.json(await announceEmoji(serverId));
+});
+
+/** Разослать состав эмодзи всем на сервере. Целиком списком: их
+ *  десятки, и разница между «добавили одно» и «вот все» здесь
+ *  меньше, чем риск, что состояния разойдутся. */
+async function announceEmoji(serverId: string) {
+  const emoji = await prisma.emoji.findMany({
+    where: { serverId },
+    select: { id: true, name: true, url: true },
+    orderBy: { name: "asc" },
+  });
+
+  realtime().to(room.server(serverId)).emit("server:emoji", { serverId, emoji });
+  return { emoji };
 }
 
 serversRouter.get("/:serverId/members", async (req, res) => {

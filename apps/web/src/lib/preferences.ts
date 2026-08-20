@@ -61,10 +61,16 @@ export interface Preferences {
    *  Берётся из заголовка окна в момент, когда её отмечают в списке.
    *  Друзья видят именно это, а не имя файла. */
   gameNames: Record<string, string>;
+  /** Говорить ли, когда друг запустил игру, в которую играем и мы. */
+  gameAlerts: boolean;
+  /** Во что играли мы сами. Нужно ровно для предыдущей строки:
+   *  без этого уведомление приходило бы на любую чужую игру, включая
+   *  ту, которую мы никогда не ставили. Заполняется само. */
+  myGames: string[];
   /** Где стоит окошко — доля свободного места, 0..1 от левого верхнего
-   *  угла. Долей, а не точкой в пикселях: у монитора дома и у монитора
-   *  на даче разное разрешение, и окошко, поставленное в угол на одном,
-   *  должно оказаться в углу и на другом.
+   *  угла. Долей, а не точкой в пикселях: у разных мониторов разное
+   *  разрешение, и окошко, поставленное в угол на одном, должно
+   *  оказаться в углу и на другом.
    *
    *  Раньше выбирался один из четырёх углов — потому что подвинуть
    *  окошко мышью было нельзя, оно сквозное. Теперь его таскают
@@ -121,6 +127,8 @@ const DEFAULTS: Preferences = {
   overlayMode: "always",
   overlayGames: [],
   gameNames: {},
+  gameAlerts: true,
+  myGames: [],
   overlayPos: { x: 0, y: 0 },
   overlayScale: 1,
   // Shift+F1 — не занята почти нигде и не спорит с рацией на F8–F11.
@@ -245,6 +253,10 @@ function read(): Preferences {
       overlayGames: Array.isArray(parsed.overlayGames)
         ? parsed.overlayGames.filter((name): name is string => typeof name === "string")
         : DEFAULTS.overlayGames,
+      gameAlerts: parsed.gameAlerts ?? DEFAULTS.gameAlerts,
+      myGames: Array.isArray(parsed.myGames)
+        ? parsed.myGames.filter((n: unknown) => typeof n === "string").slice(0, 10)
+        : [],
       gameNames:
         typeof parsed.gameNames === "object" && parsed.gameNames
           ? (parsed.gameNames as Record<string, string>)

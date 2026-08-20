@@ -53,12 +53,6 @@ export function Welcome() {
             </div>
           </div>
 
-          <p className="mt-8 text-xs text-faint">
-            Посмотреть, как всё выглядит с данными, можно под тестовой учётной записью:
-            <br />
-            anna@example.com · пароль password123
-          </p>
-
           {creating && <CreateServerDialog onClose={() => setCreating(false)} />}
         </div>
       </div>

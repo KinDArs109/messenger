@@ -3,6 +3,8 @@ import type { MessageDto, PublicUser } from "@messenger/shared";
 import { hasUnread, useStore } from "./store";
 import { desktop } from "./desktop";
 import { avatarColor, initial } from "./utils";
+import { getPreferences } from "./preferences";
+import { shouldAlertGame } from "./gameAlerts";
 
 /**
  * То, чем приложение отличается от вкладки браузера.
@@ -246,6 +248,54 @@ function findUser(userId: string): PublicUser | undefined {
  * И не уведомляем о самом себе: второе устройство того же человека
  * не новость.
  */
+/**
+ * «Друг запустил игру».
+ *
+ * Не про всякую игру, а про ту, во что играем и мы: правило и причины
+ * лежат в lib/gameAlerts.ts, здесь только показ. Тем, кто уже
+ * в разговоре, не говорим — они и так вместе.
+ */
+const рассказано = new Map<string, string>();
+
+export function notifyGame(userId: string, game: string | null): void {
+  const state = useStore.getState();
+  const prefs = getPreferences();
+
+  const можно = shouldAlertGame({
+    userId,
+    meId: state.me?.id ?? null,
+    game,
+    myGames: prefs.myGames,
+    enabled: prefs.gameAlerts,
+    inCall: Boolean(state.voiceChannelId),
+    quiet: state.myStatus === "dnd",
+    told: game !== null && рассказано.get(userId) === game,
+  });
+
+  // Помним последнее в любом случае — и когда сказали, и когда
+  // промолчали: иначе выход из разговора превращался бы в повод
+  // рассказать про игру, которая идёт уже час.
+  if (game) рассказано.set(userId, game);
+  else рассказано.delete(userId);
+
+  if (!можно || !game) return;
+
+  const who = findUser(userId);
+  if (!who) return;
+
+  void avatarPng(who).then((icon) => {
+    show({
+      title: `${who.displayName} запустил ${game}`,
+      body: "Вы тоже в это играете",
+      // Ведём в личную переписку с ним, если она есть: первое, что
+      // после такого уведомления делают, — пишут «го».
+      channelId: state.dms.find((dm) => dm.participants.some((p) => p.id === userId))?.id ?? "",
+      icon,
+      tag: `game:${userId}`,
+    });
+  });
+}
+
 export function notifyVoiceJoin(channelId: string, userId: string): void {
   const state = useStore.getState();
   if (userId === state.me?.id) return;

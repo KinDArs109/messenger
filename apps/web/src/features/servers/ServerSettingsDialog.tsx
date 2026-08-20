@@ -8,6 +8,7 @@ import { Dialog } from "@/components/Dialog";
 import { Button } from "@/components/ui/Button";
 import { PicturePicker } from "@/components/PicturePicker";
 import { BoostPanel } from "./BoostPanel";
+import { EmojiSettings } from "./EmojiSettings";
 import { avatarColor, initial } from "@/lib/utils";
 
 /** Ответ на правку сервера. Каналы и роль сервер обратно не шлёт —
@@ -153,6 +154,19 @@ export function ServerSettingsDialog({
         </h3>
         <BoostPanel server={server} />
       </div>
+
+      {/* Эмодзи — только с третьего уровня. Пока его нет, раздела
+          тоже нет: пустая недоступная строка раздражает сильнее,
+          чем её отсутствие, а что она откроет — написано в уровнях
+          выше. */}
+      {server.level >= 3 && (
+        <div className="mt-6 border-t border-line pt-4">
+          <h3 className="mb-3 text-xs font-semibold tracking-wide text-muted uppercase">
+            Свои эмодзи
+          </h3>
+          <EmojiSettings server={server} />
+        </div>
+      )}
     </Dialog>
   );
 }

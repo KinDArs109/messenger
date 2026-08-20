@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import type {
   DmChannelDto,
@@ -206,6 +207,8 @@ interface State {
     iconUrl: string | null;
     bannerUrl: string | null;
   }) => void;
+  /** Эмодзи сервера добавили или убрали. */
+  setServerEmoji: (patch: { serverId: string; emoji: { id: string; name: string; url: string }[] }) => void;
   /** Уровень сервера поменялся — кто-то поддержал или снял поддержку. */
   applyBoost: (patch: {
     serverId: string;
@@ -521,6 +524,11 @@ export const useStore = create<State>((set, get) => ({
       ),
     }),
 
+  setServerEmoji: ({ serverId, emoji }) =>
+    set({
+      servers: get().servers.map((s) => (s.id === serverId ? { ...s, emoji } : s)),
+    }),
+
   // Сервер поддержали или поддержку сняли: меняются уровень, список
   // поддержавших и баннер — он появляется и исчезает вместе с уровнем.
   applyBoost: ({ serverId, boostedBy, level, bannerUrl }) =>
@@ -776,6 +784,31 @@ export function usePresence(): (user: { id: string; status: UserStatus }) => Use
     if (me && user.id === me.id) return myStatus === "invisible" ? "offline" : myStatus;
     return presence.get(user.id) ?? user.status;
   };
+}
+
+/**
+ * Все эмодзи, которые человек может написать: имя → картинка.
+ *
+ * По всем серверам сразу, а не только по открытому. Эмодзи заводят
+ * на одном сервере, а шутят ими везде, включая личные переписки, —
+ * и сообщение, приехавшее с другого сервера, должно рисоваться, а не
+ * показывать `:название:` голым текстом.
+ *
+ * Совпадения имён на разных серверах решаются просто: побеждает
+ * первое. Спорить тут не о чем — картинки всё равно похожи, раз имя
+ * одно и то же.
+ */
+export function useEmoji(): Map<string, string> {
+  const servers = useStore((s) => s.servers);
+  return useMemo(() => {
+    const map = new Map<string, string>();
+    for (const server of servers) {
+      for (const emoji of server.emoji ?? []) {
+        if (!map.has(emoji.name)) map.set(emoji.name, emoji.url);
+      }
+    }
+    return map;
+  }, [servers]);
 }
 
 /** Есть ли непрочитанное. ULID сортируется как строка, поэтому

@@ -13,6 +13,7 @@ import { friendsRouter } from "./modules/friends/router.js";
 import { voiceRouter } from "./modules/voice/router.js";
 import { bansRouter, moderationRouter } from "./modules/servers/moderation.js";
 import { identifyUser, requireAuth } from "./middleware/auth.js";
+import { requireVerifiedEmail } from "./middleware/verified.js";
 import { serversRouter } from "./modules/servers/router.js";
 import { channelsRouter, messagesRouter } from "./modules/messages/router.js";
 import { invitesRouter, serverInvitesRouter } from "./modules/invites/router.js";
@@ -84,7 +85,12 @@ export function createApp() {
 
   // Сначала опознаём, потом считаем: иначе общий потолок считается
   // по адресу, и двое друзей из одной квартиры делят его пополам.
-  app.use("/api", identifyUser, apiLimiter);
+  //
+  // Третьим — застава: без подтверждённой почты дальше /api/auth
+  // не пройти. Один общий рубеж на весь API, а не проверка в каждом
+  // разделе: разделов два десятка, и однажды забыть в одном из них —
+  // вопрос времени.
+  app.use("/api", identifyUser, apiLimiter, requireVerifiedEmail);
   app.use("/api/auth", authRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/friends", friendsRouter);

@@ -178,6 +178,7 @@ export function SettingsDialog({
  * закрывают не глядя, и потом его уже не вернуть.
  */
 function AlertsTab() {
+  const { prefs, setPref } = usePreferences();
   const [on, setOn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -237,6 +238,21 @@ function AlertsTab() {
           Настройка своя у каждого устройства: включив её на телефоне, вы не включите её на
           компьютере.
         </p>
+      </Section>
+
+      <Section title="Когда друзья садятся играть">
+        <Toggle
+          checked={prefs.gameAlerts}
+          onChange={(value) => setPref("gameAlerts", value)}
+          label="Говорить, если друг запустил игру, в которую играю и я"
+          note="Только про игры, которые запускали и вы: иначе уведомление приходит на каждую чужую, и его выключают вместе со всеми остальными. Пока вы в разговоре — молчит: вы и так вместе."
+        />
+        {prefs.myGames.length > 0 && (
+          <p className="text-xs text-faint">
+            Считаются вашими: {prefs.myGames.slice(0, 5).join(", ")}
+            {prefs.myGames.length > 5 && " и другие"}. Список ведётся сам.
+          </p>
+        )}
       </Section>
     </div>
   );

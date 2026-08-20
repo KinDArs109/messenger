@@ -31,7 +31,9 @@ async function setup() {
         id: ulid(),
         email: `${MARK}-${name}@example.invalid`,
         username: `${MARK}-${name}`,
-        displayName: name === "a" ? "Проверка Первый" : "Проверка Второй",
+        displayName:
+          { a: "Проверка Первый", b: "Проверка Второй", c: "Проверка Третий" }[name] ??
+          "Проверка Четвёртый",
         passwordHash: hash,
         emailVerifiedAt: new Date(),
       },
@@ -39,6 +41,11 @@ async function setup() {
 
   const a = await make("a");
   const b = await make("b");
+  // Ещё двое — ради проверки уровней сервера: третий уровень даёт
+  // четыре буста, а бустят люди, по одному с человека. Вдвоём его
+  // не набрать, и проверять эмодзи было бы не на чем.
+  const c = await make("c");
+  const d = await make("d");
 
   // Переписка между ними — то, откуда звонят.
   const dm = await prisma.channel.create({
@@ -67,6 +74,8 @@ async function setup() {
         password,
         a: { id: a.id, email: a.email, name: a.displayName },
         b: { id: b.id, email: b.email, name: b.displayName },
+        c: { id: c.id, email: c.email, name: c.displayName },
+        d: { id: d.id, email: d.email, name: d.displayName },
         dm: dm.id,
       },
       null,

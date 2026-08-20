@@ -33,6 +33,13 @@ export function sniffMimeType(buffer: Buffer): string {
   ) {
     return "image/webp";
   }
+  // Запись голоса. Chrome и Firefox пишут webm (это контейнер
+  // Matroska), Safari — mp4. По заголовку видно только контейнер,
+  // а не то, звук там или видео, — поэтому голосовые принимает
+  // отдельный маршрут, и тип ставится по нему.
+  if (b(0) === 0x1a && b(1) === 0x45 && b(2) === 0xdf && b(3) === 0xa3) return "video/webm";
+  if (b(4) === 0x66 && b(5) === 0x74 && b(6) === 0x79 && b(7) === 0x70) return "video/mp4";
+
   if (b(0) === 0x25 && b(1) === 0x50 && b(2) === 0x44 && b(3) === 0x46) return "application/pdf";
   if (b(0) === 0x50 && b(1) === 0x4b && (b(2) === 0x03 || b(2) === 0x05)) return "application/zip";
 
@@ -284,4 +291,71 @@ function extensionFor(mimeType: string): string {
     "application/zip": ".zip",
   };
   return map[mimeType] ?? ".bin";
+}
+
+/** Голосовое сообщение — то, что записал браузер, как есть.
+ *
+ *  Ничего не пережимаем: запись и так идёт в opus, это уже сжатый
+ *  звук, а перекодирование стоило бы качества и времени ради лишних
+ *  десятков килобайт. Наше дело — положить файл и дать ему честное
+ *  имя типа: контейнер тот же, что у видео, но внутри только звук,
+ *  и проигрывателю на клиенте важно именно это. */
+export async function saveVoice(buffer: Buffer, container: string): Promise<StoredFile | null> {
+  await mkdir(UPLOADS_DIR, { recursive: true });
+  try {
+    const mimeType = container === "video/mp4" ? "audio/mp4" : "audio/webm";
+    const key = `${newId()}${mimeType === "audio/mp4" ? ".m4a" : ".weba"}`;
+    await writeFile(path.join(UPLOADS_DIR, key), buffer);
+    return { key, mimeType, size: buffer.length, width: null, height: null, thumbKey: null };
+  } catch {
+    return null;
+  }
+}
+
+/** Размер эмодзи. Больше незачем: в ленте оно рисуется в строку
+ *  с текстом, крупнее его никто не увидит, а вес превращается
+ *  в трафик на каждое сообщение. */
+const EMOJI_SIZE = 64;
+
+/**
+ * Эмодзи сервера.
+ *
+ * Отдельно от аватара, хотя обе картинки маленькие. Разница в двух
+ * вещах, и обе видны сразу.
+ *
+ * Прозрачность сохраняем: эмодзи почти всегда с дыркой посередине,
+ * и залитый белым квадрат на тёмной ленте выглядит наклейкой,
+ * а не эмодзи.
+ *
+ * Вписываем, а не обрезаем: аватар можно кадрировать по центру,
+ * лицо от этого не пострадает, а у эмодзи по краям обычно и лежит
+ * самое важное — обрезав, получим кусок вместо картинки.
+ */
+export async function saveEmoji(buffer: Buffer): Promise<StoredFile | null> {
+  await mkdir(UPLOADS_DIR, { recursive: true });
+  try {
+    const key = `${newId()}.webp`;
+    const small = await sharp(buffer, { failOn: "none", animated: true })
+      .rotate()
+      .resize({
+        width: EMOJI_SIZE,
+        height: EMOJI_SIZE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: WEBP_QUALITY, effort: 4 })
+      .toBuffer();
+
+    await writeFile(path.join(UPLOADS_DIR, key), small);
+    return {
+      key,
+      mimeType: "image/webp",
+      size: small.length,
+      width: EMOJI_SIZE,
+      height: EMOJI_SIZE,
+      thumbKey: null,
+    };
+  } catch {
+    return null;
+  }
 }

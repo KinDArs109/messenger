@@ -7,6 +7,7 @@ import {
   totpDisableSchema,
   totpEnableSchema,
   emailCodeSchema,
+  changeEmailSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
 } from "@messenger/shared";
@@ -19,9 +20,10 @@ import { requestPasswordReset, resetPassword } from "./reset.js";
 import { validateBody } from "../../middleware/validate.js";
 import { authLimiter } from "../../middleware/rateLimit.js";
 import { currentUserId, requireAuth } from "../../middleware/auth.js";
+import { forgetVerified } from "../../middleware/verified.js";
 import { prisma } from "../../db/client.js";
 import { toPrivateUser } from "../../lib/dto.js";
-import { badRequest, notFound, unauthorized } from "../../lib/errors.js";
+import { badRequest, conflict, notFound, unauthorized } from "../../lib/errors.js";
 import { hashRefreshToken } from "../../lib/tokens.js";
 import * as authService from "./service.js";
 import {
@@ -119,10 +121,14 @@ authRouter.get("/signup-policy", (_req, res) => {
 
 /** Подтверждение почты.
  *
- *  Мягкий режим: без подтверждения мессенджер работает, но клиент
- *  показывает полоску-напоминание. Жёсткая блокировка на компанию
- *  друзей била бы по своим же — человек, у которого письмо ушло
- *  в спам, оказался бы заперт снаружи.
+ *  Без него в мессенджер не пускают: адрес, который никто не проверял,
+ *  бесполезен ровно тогда, когда нужен больше всего — при потере
+ *  пароля. Сама застава живёт в middleware/verified.ts, здесь только
+ *  то, чем её проходят.
+ *
+ *  Эти три обработчика доступны и непроверенному: они в разделе
+ *  /api/auth, который застава пропускает всегда. Иначе подтвердить
+ *  почту было бы нечем.
  */
 authRouter.post("/email/send", requireAuth, async (req, res) => {
   const sent = await issueEmailCode(currentUserId(req), false);
@@ -139,6 +145,65 @@ authRouter.post(
       (req.body as { code: string }).code,
     );
     res.json({ emailVerified: true, emailVerifiedAt: verifiedAt.toISOString() });
+  },
+);
+
+/** Смена адреса — только пока он не подтверждён.
+ *
+ *  Это не «настройки почты», а выход из ловушки: человек ошибся
+ *  буквой при регистрации, письмо ушло в никуда, и без этой кнопки
+ *  он заперт снаружи навсегда. Подтверждённый адрес так не меняется:
+ *  там нужен другой разговор — со старым адресом, с письмом на оба,
+ *  а это уже совсем другая история.
+ *
+ *  Пароль обязателен. Адрес — ключ к восстановлению доступа, и если
+ *  менять его по одной открытой вкладке, то забытый в чужих руках
+ *  телефон превращается в потерянную учётную запись.
+ */
+authRouter.post(
+  "/email/change",
+  requireAuth,
+  authLimiter,
+  validateBody(changeEmailSchema),
+  async (req, res) => {
+    const { email, password } = req.body as { email: string; password: string };
+
+    const user = await prisma.user.findUnique({ where: { id: currentUserId(req) } });
+    if (!user) throw notFound("Пользователь не найден");
+    if (user.emailVerifiedAt) {
+      throw badRequest("EMAIL_VERIFIED", "Эта почта уже подтверждена");
+    }
+
+    if (!(await verifyPassword(user.passwordHash, password))) {
+      throw unauthorized("Неверный пароль");
+    }
+
+    if (email !== user.email) {
+      const занято = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+      if (занято) {
+        throw conflict("EMAIL_TAKEN", "Эта почта уже занята", {
+          email: "Эта почта уже зарегистрирована",
+        });
+      }
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        email,
+        // Новый адрес — новое подтверждение. Старый код к нему
+        // не подходит, иначе сменой адреса можно было бы подтвердить
+        // чужой ящик кодом, пришедшим на свой.
+        emailCodeHash: null,
+        emailCodeExpires: null,
+        emailCodeSentAt: null,
+        emailCodeAttempts: 0,
+      },
+    });
+    forgetVerified(user.id);
+
+    const sent = await issueEmailCode(user.id, true);
+    res.json({ email, sent, mailEnabled: isMailEnabled() });
   },
 );
 

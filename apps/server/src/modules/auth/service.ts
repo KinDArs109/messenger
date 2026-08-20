@@ -153,6 +153,16 @@ export async function login(input: LoginInput, userAgent?: string, client?: stri
     throw unauthorized("Неверный логин или пароль");
   }
 
+  // Не подтвердил почту — код уходит сразу, вместе со входом.
+  // Иначе человек упирается в экран «введите код», нажимает
+  // «отправить», ждёт письмо — три действия там, где хватает одного.
+  //
+  // Пауза между письмами соблюдается (false), а отказ по ней —
+  // не ошибка входа: письмо и так уже в пути.
+  if (!user.emailVerifiedAt) {
+    void issueEmailCode(user.id, false).catch(() => undefined);
+  }
+
   return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
 }
 

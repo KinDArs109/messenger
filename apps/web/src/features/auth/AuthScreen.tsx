@@ -32,9 +32,9 @@ function inviteCodeFromUrl(): string {
 export function AuthScreen({ hint }: { hint?: ReactNode }) {
   const setMe = useStore((s) => s.setMe);
   const [mode, setMode] = useState<Mode>("login");
-  const [login, setLogin] = useState("anna@example.com");
+  const [login, setLogin] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("password123");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [byCode, setByCode] = useState(false);
   const [username, setUsername] = useState("");
@@ -63,9 +63,6 @@ export function AuthScreen({ hint }: { hint?: ReactNode }) {
     setError(null);
     setFields({});
     setByCode(false);
-    if (next === "register") {
-      setPassword("");
-    }
   }
 
   async function submit(event: FormEvent) {

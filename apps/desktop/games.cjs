@@ -12,6 +12,8 @@
 // игрой, включая ту, о которой никто не слышал.
 
 const { execFile } = require("node:child_process");
+const { readFile } = require("node:fs/promises");
+const path = require("node:path");
 
 /** Что сейчас запущено: имя и занятая память в килобайтах.
  *
@@ -160,28 +162,139 @@ function regValue(key, name) {
   });
 }
 
+/** То же самое, но по всем подключам сразу: одним запуском reg
+ *  вместо сотни. Возвращает сырой вывод — разбирает его тот, кто
+ *  знает, что искал. */
+function regTree(key, name) {
+  return new Promise((resolve) => {
+    execFile(
+      "reg",
+      ["query", key, "/s", "/v", name],
+      { windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout) => resolve(error ? null : String(stdout)),
+    );
+  });
+}
+
 const STEAM_KEY = "HKCU\\Software\\Valve\\Steam";
 /** Названия по номеру игры: они не меняются, а спрашивать реестр
  *  каждые несколько секунд ради одной и той же строки незачем. */
 const steamNames = new Map();
 
+/**
+ * Какой номер игры Steam считает запущенным.
+ *
+ * Спрашиваем двумя способами, потому что одного не хватает.
+ *
+ * RunningAppID Steam пишет, когда игру запускают из него самого.
+ * Но игру часто запускают мимо: ярлыком с рабочего стола, из своего
+ * лаунчера, из чужой оболочки — и тогда это значение остаётся нулём,
+ * хотя игра идёт и Steam про неё знает.
+ *
+ * Знает он её по другой записи: у каждого приложения есть свой
+ * признак Running. Перебрать их все стоит 58 миллисекунд на сотне
+ * установленных игр — замерено; это дешевле, чем не показывать игру
+ * вовсе.
+ */
+async function steamAppId() {
+  const running = await regValue(STEAM_KEY, "RunningAppID");
+  if (running && running !== "0") return running;
+
+  const все = await regTree(`${STEAM_KEY}\\Apps`, "Running");
+  return все ? pickRunning(все) : null;
+}
+
+/**
+ * Найти в выводе reg номер приложения, у которого стоит признак
+ * «идёт».
+ *
+ * Отдельной функцией, потому что это единственное место, где можно
+ * ошибиться незаметно: вывод reg идёт парами строк — сначала путь
+ * к ключу с номером игры, потом сама запись, — и перепутать
+ * принадлежность записи ключу проще простого. Проверяется
+ * на настоящем выводе: scripts/check-steam.cjs.
+ */
+function pickRunning(text) {
+  let текущий = null;
+  for (const row of String(text).split(/\r?\n/)) {
+    const ключ = /\\Apps\\(\d+)\s*$/.exec(row.trim());
+    if (ключ) {
+      текущий = ключ[1];
+      continue;
+    }
+    if (/Running\s+REG_DWORD\s+0x0*1\s*$/i.test(row.trim()) && текущий) return текущий;
+  }
+  return null;
+}
+
 /** Во что играют в Steam прямо сейчас. null — ни во что, Steam
  *  не установлен или запись недоступна. */
 async function steamGame() {
-  const id = await regValue(STEAM_KEY, "RunningAppID");
-  if (!id || id === "0") return null;
+  const id = await steamAppId();
+  if (!id) return null;
 
   if (steamNames.has(id)) return steamNames.get(id);
 
-  const name = await regValue(`${STEAM_KEY}\\Apps\\${id}`, "Name");
-  // Без названия игра всё равно идёт — покажем хотя бы это. Молчать
-  // только потому, что Steam не дописал строку, глупо.
+  // Название ищем в двух местах. В реестре оно есть не у всех игр —
+  // Steam пишет его не всегда, и «играет в игру из Steam» вместо
+  // названия выглядит поломкой. Рядом же лежит файл описания игры,
+  // где название есть всегда.
+  const name = (await regValue(`${STEAM_KEY}\\Apps\\${id}`, "Name")) ?? (await manifestName(id));
+
   const shown = name || "игру из Steam";
   steamNames.set(id, shown);
   return shown;
 }
 
+/**
+ * Название игры из файла описания, который Steam кладёт рядом с ней.
+ *
+ * Игры лежат не в одной папке: библиотек бывает несколько — на разных
+ * дисках, — и их список Steam держит в libraryfolders.vdf. Читаем его
+ * один раз и запоминаем: диски не появляются по ходу игры.
+ */
+let libraries = null;
+
+async function steamLibraries() {
+  if (libraries) return libraries;
+
+  const root = await regValue(STEAM_KEY, "SteamPath");
+  if (!root) return (libraries = []);
+
+  // Steam пишет путь через прямые слэши и строчными буквами —
+  // Windows такое принимает, а нам всё равно.
+  const found = [path.join(root, "steamapps")];
+  try {
+    const vdf = await readFile(path.join(root, "steamapps", "libraryfolders.vdf"), "utf8");
+    for (const match of vdf.matchAll(/"path"\s*"([^"]+)"/g)) {
+      const dir = path.join(match[1].replace(/\\\\/g, "\\"), "steamapps");
+      if (!found.includes(dir)) found.push(dir);
+    }
+  } catch {
+    // Файла нет — значит библиотека одна, та, что рядом со Steam.
+  }
+
+  libraries = found;
+  return libraries;
+}
+
+async function manifestName(id) {
+  for (const dir of await steamLibraries()) {
+    try {
+      const text = await readFile(path.join(dir, `appmanifest_${id}.acf`), "utf8");
+      const name = /"name"\s*"([^"]+)"/.exec(text)?.[1];
+      if (name) return name;
+    } catch {
+      // Игра лежит в другой библиотеке — смотрим дальше.
+    }
+  }
+  return null;
+}
+
 module.exports = {
+  steamAppId,
+  pickRunning,
+  manifestName,
   runningProcesses,
   anyRunning,
   pickable,

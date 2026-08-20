@@ -59,6 +59,7 @@ export function toServerDto(
       topic: string | null;
       position: number;
     }[];
+    emoji?: { id: string; name: string; url: string }[];
   },
   role: MemberRole,
   boostedBy: string[],
@@ -75,6 +76,10 @@ export function toServerDto(
     role,
     boostedBy,
     level,
+    // Эмодзи открываются на третьем уровне — и наружу уходят вместе
+    // с ним. Иначе снятый буст оставлял бы их работать: картинки
+    // рисуются по списку, а список приехал раньше.
+    emoji: level >= 3 ? (server.emoji ?? []) : [],
     channels: server.channels.map((c) => ({
       id: c.id,
       serverId: c.serverId ?? server.id,

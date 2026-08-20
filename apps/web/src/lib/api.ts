@@ -118,6 +118,14 @@ async function request<T>(path: string, options: Options = {}, retry = true): Pr
     const error = (data as { error?: { code: string; message: string; fields?: Record<string, string> } })?.error;
     const code = error?.code ?? "UNKNOWN";
 
+    // Почту перестали считать подтверждённой, пока вкладка была
+    // открыта. Сообщаем это приложению событием, а не обращением
+    // к хранилищу: хранилище само зовёт этот модуль, и импорт
+    // в обратную сторону замкнул бы их друг на друга.
+    if (code === "EMAIL_NOT_VERIFIED" && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("email:unverified"));
+    }
+
     // Непредвиденную ошибку сервера показывать человеку дословно
     // нельзя: в режиме разработки туда попадают пути к файлам и куски
     // исходного кода. Подробности — в консоль, на экран — по-русски.

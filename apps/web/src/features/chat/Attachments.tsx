@@ -3,8 +3,12 @@ import { Download, FileText, X } from "lucide-react";
 import type { AttachmentDto } from "@messenger/shared";
 import { formatBytes } from "@/lib/utils";
 import { ImageViewer } from "./ImageViewer";
+import { VoicePlayer } from "./VoicePlayer";
 
 const isImage = (mimeType: string) => mimeType.startsWith("image/");
+/** Голосовое отличается от обычного файла тем, что его слушают
+ *  на месте, а не скачивают. */
+const isVoice = (mimeType: string) => mimeType.startsWith("audio/");
 
 /** Вложения под текстом сообщения. */
 export function Attachments({ items }: { items: AttachmentDto[] }) {
@@ -14,7 +18,9 @@ export function Attachments({ items }: { items: AttachmentDto[] }) {
   return (
     <div className="mt-1 flex flex-col gap-2">
       {items.map((item) =>
-        isImage(item.mimeType) ? (
+        isVoice(item.mimeType) ? (
+          <VoicePlayer key={item.id} item={item} />
+        ) : isImage(item.mimeType) ? (
           <button
             key={item.id}
             onClick={() => setZoomed(item)}

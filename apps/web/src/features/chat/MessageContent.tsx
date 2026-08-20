@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { findMentions } from "@messenger/shared";
-import { useStore } from "@/lib/store";
+import { useEmoji, useStore } from "@/lib/store";
 
 /** Текст сообщения с подсвеченными упоминаниями.
  *
@@ -37,7 +37,28 @@ function trimTail(url: string): string {
   return url.slice(0, end);
 }
 
-type Part = string | { username: string } | { url: string };
+type Part = string | { username: string } | { url: string } | { emoji: string };
+
+/** Эмодзи в тексте: `:название:`.
+ *
+ *  Имя — латиница, цифры и подчёркивание, как при заведении. Обычный
+ *  смайлик из двоеточия и скобки под это правило не подходит и остаётся
+ *  текстом, каким и был. */
+const EMOJI = /:([a-z0-9_]{2,32}):/g;
+
+/** Разбить кусок текста на текст и эмодзи. */
+function splitEmoji(text: string): Part[] {
+  const out: Part[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(EMOJI)) {
+    const start = match.index;
+    if (start > cursor) out.push(text.slice(cursor, start));
+    out.push({ emoji: match[1] ?? "" });
+    cursor = start + match[0].length;
+  }
+  if (cursor < text.length) out.push(text.slice(cursor));
+  return out;
+}
 
 /** Разбить кусок обычного текста на текст и ссылки. */
 function splitLinks(text: string): Part[] {
@@ -58,6 +79,7 @@ function splitLinks(text: string): Part[] {
 export function MessageContent({ content }: { content: string }) {
   const me = useStore((s) => s.me);
   const members = useStore((s) => s.members);
+  const emoji = useEmoji();
 
   const parts = useMemo(() => {
     const mentions = findMentions(content);
@@ -73,13 +95,40 @@ export function MessageContent({ content }: { content: string }) {
 
     // Ссылки ищем только в том, что не оказалось упоминанием: иначе
     // «@user» внутри адреса разъехалось бы на две части.
-    return plain.flatMap((part) => (typeof part === "string" ? splitLinks(part) : [part]));
+    const linked = plain.flatMap((part) =>
+      typeof part === "string" ? splitLinks(part) : [part],
+    );
+
+    // Эмодзи — в последнюю очередь и только в тексте: двоеточие
+    // в адресе (https://) иначе съедало бы половину ссылки.
+    return linked.flatMap((part) => (typeof part === "string" ? splitEmoji(part) : [part]));
   }, [content]);
 
   return (
     <>
       {parts.map((part, index) => {
         if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
+
+        if ("emoji" in part) {
+          const url = emoji.get(part.emoji);
+          // Имени нет — значит эмодзи с таким названием нам недоступно
+          // (не тот сервер, уже удалили). Оставляем как написано:
+          // текст `:название:` хотя бы читается, пустое место — нет.
+          if (!url) return <Fragment key={index}>:{part.emoji}:</Fragment>;
+
+          return (
+            <img
+              key={index}
+              src={url}
+              alt={`:${part.emoji}:`}
+              title={`:${part.emoji}:`}
+              // Ростом со строку, а не фиксированным размером: рядом
+              // с крупным шрифтом мелкое эмодзи выглядит промахом.
+              className="inline-block h-[1.375em] w-auto align-text-bottom"
+              loading="lazy"
+            />
+          );
+        }
 
         if ("url" in part) {
           // href всегда со схемой: без неё браузер считает адрес

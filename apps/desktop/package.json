@@ -1,7 +1,7 @@
 {
   "name": "@messenger/desktop",
   "private": true,
-  "version": "1.0.27",
+  "version": "1.0.28",
   "description": "Мессенджер",
   "main": "main.cjs",
   "scripts": {
@@ -12,7 +12,10 @@
     "check:call": "electron scripts/check-call.cjs",
     "check:app": "electron scripts/check-app.cjs",
     "check:game": "electron scripts/check-game.cjs",
-    "check:release": "electron scripts/check-release.cjs"
+    "check:release": "electron scripts/check-release.cjs",
+    "check:emoji": "electron scripts/check-emoji.cjs",
+    "check:voice-message": "electron scripts/check-voice-message.cjs",
+    "check:steam": "electron scripts/check-steam.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",

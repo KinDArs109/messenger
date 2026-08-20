@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { desktop } from "@/lib/desktop";
 import { gameName } from "@/lib/games";
-import { getPreferences } from "@/lib/preferences";
+import { getPreferences, setPreference } from "@/lib/preferences";
+import { rememberGame } from "@/lib/gameAlerts";
 import { getSocket } from "@/lib/socket";
 import { useStore } from "@/lib/store";
 
@@ -73,7 +74,11 @@ function send(exe: string | null): void {
     return;
   }
 
-  socket.emit("presence:playing", { game: gameName(exe, getPreferences().gameNames) });
+  const name = gameName(exe, getPreferences().gameNames);
+  // Заодно запоминаем игру себе: по этому списку решается, будить ли
+  // нас, когда её запустит друг.
+  setPreference("myGames", rememberGame(getPreferences().myGames, name));
+  socket.emit("presence:playing", { game: name });
 }
 
 /** Во что играет человек. null — ни во что или мы не знаем. */

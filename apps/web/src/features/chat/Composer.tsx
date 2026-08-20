@@ -6,6 +6,8 @@ import { getSocket } from "@/lib/socket";
 import { useStore } from "@/lib/store";
 import { formatBytes } from "@/lib/utils";
 import { PendingAttachments } from "./Attachments";
+import { EmojiPicker } from "./EmojiPicker";
+import { VoiceRecorder } from "./VoiceRecorder";
 
 export function Composer({
   channelId,
@@ -135,6 +137,41 @@ export function Composer({
     }
   }
 
+  /** Вставить эмодзи туда, где стоит курсор, а не в конец: дописывать
+   *  их посреди фразы — обычное дело. */
+  function insertEmoji(name: string) {
+    const el = area.current;
+    const token = `:${name}: `;
+    if (!el) {
+      setValue((prev) => prev + token);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? start;
+    const next = value.slice(0, start) + token + value.slice(end);
+    setValue(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const at = start + token.length;
+      el.setSelectionRange(at, at);
+      grow();
+    });
+  }
+
+  /** Отправить записанное — сразу и отдельным сообщением. */
+  async function sendVoice(attachment: AttachmentDto) {
+    setError(null);
+    try {
+      const r = await api.post<{ message: MessageDto }>(`/channels/${channelId}/messages`, {
+        content: "",
+        attachmentIds: [attachment.id],
+      });
+      addMessage(r.message);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Запись не отправилась");
+    }
+  }
+
   function onPaste(event: ClipboardEvent) {
     const files = [...event.clipboardData.files];
     if (files.length > 0) {
@@ -239,6 +276,15 @@ export function Composer({
         {left < 200 && (
           <span className={`py-3 text-xs ${left < 0 ? "text-danger" : "text-muted"}`}>{left}</span>
         )}
+
+        {/* Свои эмодзи — рядом с отправкой, как в дискорде: их выбирают
+            в конце фразы, а не в начале. */}
+        <EmojiPicker onPick={insertEmoji} />
+
+        {/* Голосовое уходит само, отдельным сообщением: дописывать
+            к записи текст никто не станет, а лишний шаг «теперь нажми
+            отправить» превращает быстрое действие в медленное. */}
+        <VoiceRecorder onSend={(attachment) => void sendVoice(attachment)} onError={setError} />
 
         <button
           onClick={() => void send()}

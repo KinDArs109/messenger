@@ -76,6 +76,9 @@ function toDto(message: FullMessage, viewerId: string): MessageDto {
       thumbUrl: thumbUrlFor(a.storageKey, a.width),
       width: a.width,
       height: a.height,
+      // Длительность есть только у записи голоса; у остальных null
+      // и клиенту не мешает.
+      duration: a.duration,
     })),
     editedAt: message.editedAt?.toISOString() ?? null,
     createdAt: message.createdAt.toISOString(),

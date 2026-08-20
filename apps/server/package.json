@@ -27,7 +27,9 @@
     "check:pictures": "tsx --env-file=.env scripts/check-pictures.ts",
     "check:turn": "tsx --env-file=.env scripts/check-turn.ts",
     "bench": "tsx --env-file=.env scripts/bench.ts",
-    "fixture:call": "tsx --env-file=.env scripts/call-fixture.ts"
+    "fixture:call": "tsx --env-file=.env scripts/call-fixture.ts",
+    "check:verify": "tsx --env-file=.env scripts/check-verify.ts",
+    "db:verified": "tsx --env-file=.env scripts/set-verified.ts"
   },
   "dependencies": {
     "@messenger/shared": "*",
