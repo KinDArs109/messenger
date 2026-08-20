@@ -22,7 +22,6 @@ import { requestPasswordReset, resetPassword } from "./reset.js";
 import { validateBody } from "../../middleware/validate.js";
 import { authLimiter } from "../../middleware/rateLimit.js";
 import { currentUserId, requireAuth } from "../../middleware/auth.js";
-import { forgetVerified } from "../../middleware/verified.js";
 import { prisma } from "../../db/client.js";
 import { toPrivateUser } from "../../lib/dto.js";
 import { badRequest, conflict, notFound, unauthorized } from "../../lib/errors.js";
@@ -167,16 +166,17 @@ authRouter.get("/signup-policy", (_req, res) => {
   res.json({ codeRequired: Boolean(env.SIGNUP_CODE) });
 });
 
-/** Подтверждение почты.
+/** Подтверждение почты — по желанию.
  *
- *  Без него в мессенджер не пускают: адрес, который никто не проверял,
- *  бесполезен ровно тогда, когда нужен больше всего — при потере
- *  пароля. Сама застава живёт в middleware/verified.ts, здесь только
- *  то, чем её проходят.
+ *  Раньше без него в мессенджер не пускали вовсе. Заставу убрали:
+ *  она стояла между приглашением и первым сообщением и встречала
+ *  позванного человека не перепиской, а поручением сходить в почту.
  *
- *  Эти три обработчика доступны и непроверенному: они в разделе
- *  /api/auth, который застава пропускает всегда. Иначе подтвердить
- *  почту было бы нечем.
+ *  Сами обработчики остались, и не за компанию: адрес подтверждается
+ *  сам при первом входе — код из письма это и делает, — но человеку
+ *  бывает нужно подтвердить его раньше или поправить опечатку, пока
+ *  сессия ещё жива. Без этого опечатка всплыла бы только через месяц,
+ *  когда сессия кончится и войти будет уже нечем.
  */
 authRouter.post("/email/send", requireAuth, async (req, res) => {
   const sent = await issueEmailCode(currentUserId(req), false);
@@ -198,9 +198,10 @@ authRouter.post(
 
 /** Смена адреса — только пока он не подтверждён.
  *
- *  Это не «настройки почты», а выход из ловушки: человек ошибся
- *  буквой при регистрации, письмо ушло в никуда, и без этой кнопки
- *  он заперт снаружи навсегда. Подтверждённый адрес так не меняется:
+ *  Спасение от опечатки: человек ошибся буквой при регистрации,
+ *  письма уходят в никуда — и, когда сессия кончится, войти он
+ *  не сможет, потому что код входа придёт на несуществующий адрес.
+ *  Подтверждённый адрес так не меняется:
  *  там нужен другой разговор — со старым адресом, с письмом на оба,
  *  а это уже совсем другая история.
  *
@@ -248,7 +249,6 @@ authRouter.post(
         emailCodeAttempts: 0,
       },
     });
-    forgetVerified(user.id);
 
     const sent = await issueEmailCode(user.id, true);
     res.json({ email, sent, mailEnabled: isMailEnabled() });

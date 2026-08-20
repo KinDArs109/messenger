@@ -15,7 +15,6 @@ import {
 import { toPrivateUser } from "../../lib/dto.js";
 import { verifyCode } from "../../lib/totp.js";
 import { isMailEnabled } from "../../lib/mailer.js";
-import { issueEmailCode } from "./email.js";
 import { issueLoginCode, verifyLoginCode, прикрытыйАдрес } from "./loginCode.js";
 import { AppError, conflict, unauthorized } from "../../lib/errors.js";
 import { env } from "../../config/env.js";
@@ -158,11 +157,11 @@ export async function register(input: RegisterInput, userAgent?: string, client?
       },
     });
 
-    // Код уходит сразу после регистрации и не ждёт отправки: письмо
-    // может идти секунды, а человек в этот момент смотрит на форму.
-    void issueEmailCode(user.id, true).catch((error) =>
-      console.error("Не удалось отправить код подтверждения:", error),
-    );
+    // Письма с кодом здесь больше нет. Подтверждать адрес сразу после
+    // регистрации человека никто не заставляет, а письмо, которое
+    // ничего не открывает и никуда не ведёт, — это просто письмо
+    // в спам. Адрес проверится сам при первом входе: там код
+    // обязателен, и он же отметит почту подтверждённой.
 
     return { user: toPrivateUser(user), ...(await issueSession(user.id, userAgent, client)) };
   } catch (error) {

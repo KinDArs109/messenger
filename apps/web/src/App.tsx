@@ -34,7 +34,6 @@ import { FriendsPanel } from "@/features/friends/FriendsPanel";
 import { usePlaying } from "@/features/friends/usePlaying";
 import { CallDialog } from "@/features/voice/CallDialog";
 import { useCallEvents } from "@/features/voice/useCalls";
-import { VerifyEmailGate } from "@/features/auth/VerifyEmailGate";
 import { currentSession } from "@/lib/voice";
 import { playSound } from "@/lib/sounds";
 import { ChannelSidebar } from "@/features/channels/ChannelSidebar";
@@ -179,18 +178,6 @@ function Routes() {
     })();
   }, []);
 
-  // Отказ «подтвердите почту» может прийти в уже открытую вкладку:
-  // например, требование включили, пока человек сидел в мессенджере.
-  // Тогда вместо потока непонятных ошибок показываем экран с кодом.
-  useEffect(() => {
-    const onUnverified = () => {
-      const me = useStore.getState().me;
-      if (me?.emailVerified) useStore.getState().setMe({ ...me, emailVerified: false });
-    };
-    window.addEventListener("email:unverified", onUnverified);
-    return () => window.removeEventListener("email:unverified", onUnverified);
-  }, []);
-
   if (restoring) return <Splash />;
 
   function leaveInvite() {
@@ -212,15 +199,6 @@ function Routes() {
       />
     );
   }
-
-  // Почта не подтверждена — дальше этого экрана не пускаем, и это
-  // не украшение: сервер отвечает тем же самым отказом на любой запрос
-  // мимо /api/auth. Показать мессенджер здесь значило бы показать
-  // пустые окна и непонятные ошибки.
-  //
-  // Приглашение подождёт: ссылка остаётся в адресной строке и
-  // откроется сразу после подтверждения.
-  if (me && !me.emailVerified) return <VerifyEmailGate />;
 
   if (inviteCode) return <InvitePage code={inviteCode} onDone={leaveInvite} />;
 
