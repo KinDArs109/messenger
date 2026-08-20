@@ -5,7 +5,8 @@
   "description": "Хозяйская панель мессенджера — отдельное приложение",
   "main": "main.cjs",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "ярлык": "powershell -NoProfile -ExecutionPolicy Bypass -File ярлык.ps1"
   },
   "devDependencies": {
     "electron": "^34.0.0"
