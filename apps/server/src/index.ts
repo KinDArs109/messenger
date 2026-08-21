@@ -5,6 +5,7 @@ import { createRealtime } from "./realtime/index.js";
 import { setRealtime } from "./realtime/emitter.js";
 import { prisma } from "./db/client.js";
 import { TurnServer, localIPv4, setTurnServer } from "./turn/server.js";
+import { раздачаЕсть } from "./realtime/sfu.js";
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -39,6 +40,12 @@ const turn = env.TURN_SECRET
 
 httpServer.listen(env.PORT, () => {
   const isProduction = env.NODE_ENV === "production";
+
+  // Раздачу поднимаем сразу, а не при первом показе: если она
+  // не заведётся, узнать об этом лучше здесь, в журнале запуска,
+  // чем посреди разговора.
+  void раздачаЕсть();
+
   console.log(`  Режим:   ${env.NODE_ENV}`);
   console.log(`  API:     http://localhost:${env.PORT}`);
   // В продакшене клиент отдаёт этот же процесс, в разработке — Vite.

@@ -64,6 +64,12 @@ if (typeof document !== "undefined") {
 }
 
 export function getSocket(): AppSocket | null {
+  // В разработке соединение доступно из консоли: window.__socket.
+  // Тем же пользуются сквозные проверки — им надо спросить сервер
+  // тем же способом, каким его спрашивает мессенджер.
+  if (import.meta.env?.DEV && typeof window !== "undefined") {
+    (window as unknown as { __socket: AppSocket | null }).__socket = socket;
+  }
   return socket;
 }
 

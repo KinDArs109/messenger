@@ -2,6 +2,7 @@ import { room, type VoicePeer, type VoiceSignal } from "@messenger/shared";
 import { canAccessChannel, isOnline, type Realtime, type RealtimeSocket } from "./index.js";
 import { prisma } from "../db/client.js";
 import { notify, pushEnabled } from "../modules/push/service.js";
+import * as раздача from "./sfu.js";
 
 /**
  * Голосовые каналы: сервер знает только, кто где сидит.
@@ -11,10 +12,16 @@ import { notify, pushEnabled } from "../modules/push/service.js";
  * сообщения. Поэтому разговор впятером не грузит ноутбук ничем, кроме
  * пары десятков килобайт переписки о том, как соединиться.
  *
- * Обратная сторона выбора: соединения идут «каждый с каждым», и на
- * больших компаниях трафик у участника растёт линейно. Для десятка
- * друзей это правильный размен — SFU-сервер, который свёл бы всё
- * в один поток, надо где-то держать, а держать его негде.
+ * Так по-прежнему ходит голос: он весит копейки, а прямая дорога
+ * короче — через сервер это лишние миллисекунды там, где их слышно.
+ *
+ * А вот картинка так больше не ходит. Показ экрана «каждому свой»
+ * означал, что показывающий кодирует и отправляет его столько раз,
+ * сколько людей в канале, — вчетвером втрое. Замер показал, чем это
+ * кончается: при нехватке полосы кодировщик роняет и размер, и кадры
+ * сразу. Теперь показ уходит один раз, а размножает его сервер —
+ * см. sfu.ts. Если раздача почему-то недоступна, мессенджер вернётся
+ * к прежнему способу сам.
  */
 
 interface VoiceMember {
@@ -210,7 +217,13 @@ export async function leaveVoice(
   const channelId = userChannel.get(userId);
   if (!channelId) return;
 
-  if (socketId && rooms.get(channelId)?.get(userId)?.socketId !== socketId) return;
+  const member = rooms.get(channelId)?.get(userId);
+  if (socketId && member?.socketId !== socketId) return;
+
+  // Чьи дороги раздачи закрывать. Обычно это тот сокет, что попросил
+  // выйти; при переходе между каналами он не назван, и тогда берём
+  // тот, что записан в составе, — раздачу держал именно он.
+  const чейСокет = socketId ?? member?.socketId;
 
   userChannel.delete(userId);
   const members = rooms.get(channelId);
@@ -219,6 +232,17 @@ export async function leaveVoice(
 
   const targets = await audience(channelId);
   emitToAudience(io, targets, (to) => to.emit("voice:left", { channelId, userId }));
+
+  // И раздача уходит вместе с человеком: оставленные дороги держат
+  // порты и память, а на маленькой машине это не мелочь.
+  if (чейСокет) {
+    for (const producerId of раздача.закрыть(чейСокет)) {
+      for (const [кто] of rooms.get(channelId) ?? []) {
+        if (кто === userId) continue;
+        io.to(room.user(кто)).emit("sfu:producer-gone", { producerId, userId });
+      }
+    }
+  }
 }
 
 /* Здесь жила временная запись в журнал: чем именно обмениваются
@@ -318,7 +342,106 @@ export function registerVoiceHandlers(
     })();
   });
 
-  socket.on("voice:leave", () => void leaveVoice(io, userId));
+  socket.on("voice:leave", () => void leaveVoice(io, userId, socket.id));
+
+  /* ── Раздача картинки ─────────────────────────────────────────
+   *
+   * Всё здесь — переговоры двух половин одной библиотеки: сервер
+   * пересказывает клиенту то, что ему отдал рабочий процесс, и
+   * обратно. Мессенджер в эти подробности не смотрит.
+   *
+   * Единственное, что он проверяет сам и на каждом шаге, — что человек
+   * и правда сидит в том канале, о котором говорит. Иначе разговор
+   * можно было бы подслушать, просто назвав чужой поток по имени. */
+
+  socket.on("sfu:capabilities", async (ack) => {
+    const channelId = userChannel.get(userId);
+    if (typeof ack !== "function") return;
+    if (!channelId) return ack(null);
+    ack(await раздача.возможности(channelId));
+  });
+
+  socket.on("sfu:transport", async (data, ack) => {
+    const channelId = userChannel.get(userId);
+    if (typeof ack !== "function") return;
+    const куда = data?.куда === "recv" ? "recv" : "send";
+    if (!channelId) return ack(null);
+    ack(await раздача.дорога(socket.id, userId, channelId, куда));
+  });
+
+  socket.on("sfu:connect", async (data, ack) => {
+    if (typeof ack !== "function") return;
+    if (!userChannel.get(userId)) return ack(false);
+    ack(
+      await раздача.соединить(
+        socket.id,
+        String(data?.transportId ?? ""),
+        data?.dtlsParameters as never,
+      ),
+    );
+  });
+
+  socket.on("sfu:produce", async (data, ack) => {
+    const channelId = userChannel.get(userId);
+    if (typeof ack !== "function") return;
+    if (!channelId) return ack(null);
+
+    const что = data?.что;
+    if (что !== "screen" && что !== "screenAudio" && что !== "video") return ack(null);
+
+    const producerId = await раздача.отдаёт(
+      socket.id,
+      String(data.transportId ?? ""),
+      data.kind === "audio" ? "audio" : "video",
+      data.rtpParameters as never,
+      что,
+    );
+    ack(producerId);
+
+    if (!producerId) return;
+    // Зовём остальных подписаться. Только тех, кто сидит в этом же
+    // канале: остальным этот поток не предназначен.
+    for (const [кто] of rooms.get(channelId) ?? []) {
+      if (кто === userId) continue;
+      io.to(room.user(кто)).emit("sfu:producer", { producerId, userId, что });
+    }
+  });
+
+  socket.on("sfu:running", (ack) => {
+    const channelId = userChannel.get(userId);
+    if (typeof ack !== "function") return;
+    ack(channelId ? раздача.чтоИдёт(socket.id, channelId) : []);
+  });
+
+  socket.on("sfu:consume", async (data, ack) => {
+    if (typeof ack !== "function") return;
+    if (!userChannel.get(userId)) return ack(null);
+    ack(
+      await раздача.принимает(
+        socket.id,
+        String(data?.producerId ?? ""),
+        data?.rtpCapabilities as never,
+      ),
+    );
+  });
+
+  socket.on("sfu:resume", async (data, ack) => {
+    if (typeof ack !== "function") return;
+    ack(await раздача.пустить(socket.id, String(data?.consumerId ?? "")));
+  });
+
+  socket.on("sfu:stop", (data) => {
+    const channelId = userChannel.get(userId);
+    const что = data?.что;
+    if (!channelId || (что !== "screen" && что !== "screenAudio" && что !== "video")) return;
+
+    for (const producerId of раздача.перестал(socket.id, что)) {
+      for (const [кто] of rooms.get(channelId) ?? []) {
+        if (кто === userId) continue;
+        io.to(room.user(кто)).emit("sfu:producer-gone", { producerId, userId });
+      }
+    }
+  });
 
   socket.on("voice:signal", (data) => {
     const channelId = userChannel.get(userId);

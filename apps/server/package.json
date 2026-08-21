@@ -35,7 +35,8 @@
     "check:signup": "tsx --env-file=.env scripts/check-signup.ts",
     "check:idle": "tsx --env-file=.env scripts/check-idle.ts",
     "check:admin": "tsx --env-file=.env scripts/check-admin.ts",
-    "check:live": "tsx --env-file=.env scripts/check-live.ts"
+    "check:live": "tsx --env-file=.env scripts/check-live.ts",
+    "check:sfu-server": "tsx --env-file=.env scripts/check-sfu-server.ts"
   },
   "dependencies": {
     "@messenger/shared": "*",
@@ -68,5 +69,8 @@
     "prisma": "^6.19.0",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.20.6"
+  },
+  "optionalDependencies": {
+    "mediasoup": "^3.26.0"
   }
 }

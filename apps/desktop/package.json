@@ -20,7 +20,8 @@
     "check:poison": "electron scripts/check-poison.cjs",
     "check:undressed": "electron scripts/check-undressed.cjs",
     "check:share": "electron scripts/check-share.cjs",
-    "check:codec": "electron scripts/check-codec.cjs"
+    "check:codec": "electron scripts/check-codec.cjs",
+    "check:sfu": "electron scripts/check-sfu.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",

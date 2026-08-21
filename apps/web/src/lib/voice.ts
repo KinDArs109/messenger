@@ -4,6 +4,7 @@ import { isApp } from "./desktop";
 import { guardScreenAudio, type EchoGuard } from "./echo";
 import { getPreferences } from "./preferences";
 import { просимH264 } from "./codecs";
+import { Раздача, type Что } from "./sfu";
 import { высотаСтупени, решить, НАЧАЛО, type Положение } from "./adapt";
 import { SpeechGate, rmsOf } from "./speaking";
 import { getSocket } from "./socket";
@@ -158,6 +159,13 @@ function screenBitrate(peers = 1, сейчас: number | null = null): number {
  *  это не игра, а битрейт вдвое меньше экранного оставляет запас
  *  на сам экран, когда идут оба. */
 const VIDEO_FPS = 24;
+
+/** Сколько ждём раздачу, прежде чем пойти прежним путём.
+ *
+ *  Десять секунд — это долго для взгляда и мало для сети: рукопожатие
+ *  с сервером обычно занимает доли секунды, а если не заняло, значит
+ *  дороги нет и ждать больше нечего. */
+const SFU_ЖДЁМ = 10_000;
 const VIDEO_BITRATE = 1_200_000;
 
 /** Просьба не брать в захват собственный вывод страницы. Появилась
@@ -408,6 +416,24 @@ class VoiceSession {
   private ice: RTCIceServer[] = FALLBACK;
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * Раздача: показ уходит на сервер один раз, а размножает его он.
+   *
+   * Может не завестись — тогда остаётся прежний способ «каждому свой
+   * поток», и это решается для каждого показа отдельно, в момент
+   * включения.
+   */
+  private sfu: Раздача | null = null;
+  /** Что от кого приехало через раздачу. Дорожки одного показа
+   *  приезжают порознь, поэтому держим поток и добавляем в него. */
+  private раздачей = new Map<string, { screen: MediaStream; video: MediaStream }>();
+  /** И то же самое, но пришедшее напрямую: показывать наверх надо
+   *  одно из двух, а решает это одно место — см. показать(). */
+  private напрямую = new Map<string, { screen: MediaStream | null; video: MediaStream | null }>();
+  /** Что из своего ушло через раздачу: по этому и решаем, слать ли
+   *  его ещё и напрямую. */
+  private черезРаздачу = new Set<ShareKind>();
+
   /* Насколько мы сами опустили показ ради кадров — см. lib/adapt.ts —
    * и какую высоту отдаём захвату сейчас. */
   private screenAdapt: Положение = НАЧАЛО;
@@ -443,6 +469,10 @@ class VoiceSession {
 
   async start(): Promise<void> {
     this.ice = await loadIceServers();
+
+    // Раздачу поднимаем в фоне: разговор не должен ждать её, а если
+    // она не заведётся — показ пойдёт прежним способом.
+    void this.поднятьРаздачу().catch(() => undefined);
 
     this.mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
     this.context = new AudioContext();
@@ -847,6 +877,21 @@ class VoiceSession {
       return;
     }
 
+    /*
+     * Через раздачу поток один — у него и спрашиваем.
+     *
+     * Раньше приходилось брать худшее из соединений: их было столько
+     * же, сколько собеседников. Теперь соединение одно, и «худший
+     * из» превратилось в «единственный».
+     */
+    if (this.черезРаздачу.has("screen")) {
+      const как = await this.sfu?.какИдёт("screen");
+      const кадры = как?.fps ?? null;
+      this.events.onScreenTrouble(как?.предел ?? null, кадры === null ? null : Math.round(кадры));
+      await this.adaptScreen(кадры);
+      return;
+    }
+
     let reason: "cpu" | "bandwidth" | null = null;
     let fps: number | null = null;
     let лучший: number | null = null;
@@ -938,6 +983,11 @@ class VoiceSession {
 
   /** Пересчитать потолок битрейта у всех, кому идёт показ. */
   private async relimitScreen(): Promise<void> {
+    if (this.черезРаздачу.has("screen")) {
+      await this.sfu?.потолок("screen", screenBitrate(1, this.screenNow));
+      return;
+    }
+
     for (const senders of this.shares.screen.senders.values()) {
       for (const sender of senders) {
         if (sender.track?.kind === "video") await this.limitVideo(sender, "screen");
@@ -1027,7 +1077,10 @@ class VoiceSession {
     // Только объявленное: иначе кадры обгонят объявление.
     for (const kind of KINDS) {
       const share = this.shares[kind];
-      if (share.stream && share.published) this.sendShareTo(userId, peer, kind);
+      // Через раздачу опоздавший подпишется сам — сервер позовёт.
+      if (share.stream && share.published && !this.черезРаздачу.has(kind)) {
+        this.sendShareTo(userId, peer, kind);
+      }
     }
 
     connection.ontrack = (event) => {
@@ -1143,9 +1196,32 @@ class VoiceSession {
       }
     }
 
+    this.напрямую.set(userId, { screen, video });
+    this.показать(userId);
+  }
+
+  /**
+   * Отдать наверх то, что сейчас видно от человека.
+   *
+   * Дорог у картинки две: через раздачу и напрямую. Первая лучше —
+   * ради неё всё и делалось, — но она может не завестись, и тогда
+   * работает вторая. Решать, что показывать, должно одно место,
+   * иначе два пути начнут спорить и картинка замигает.
+   */
+  private показать(userId: string): void {
+    const через = this.раздачей.get(userId);
+    const мимо = this.напрямую.get(userId);
+
+    const есть = (поток: MediaStream | undefined) =>
+      поток && поток.getTracks().length > 0 ? поток : null;
+
+    const screen = есть(через?.screen) ?? мимо?.screen ?? null;
+    const video = есть(через?.video) ?? мимо?.video ?? null;
+
     // Звук показа ведём сами, а не элементом в разметке: он не должен
     // ни зависеть от того, какой канал сейчас открыт, ни звучать мимо
     // общей громкости и гасителя эха.
+    const peer = this.peers.get(userId);
     if (peer) this.pipeScreen(userId, peer, screen);
 
     const before = this.shown.get(userId);
@@ -1153,6 +1229,85 @@ class VoiceSession {
     if (before?.video !== video) this.events.onVideo(userId, video);
     this.shown.set(userId, { screen, video });
   }
+
+  /* ── Раздача ──────────────────────────────────────────────────
+   *
+   * Сервер зовёт подписаться на чужой поток, мы подписываемся и
+   * складываем приехавшие дорожки по людям. Дальше — тот же путь,
+   * что и у пришедшего напрямую. */
+
+  /** Приехала чужая дорожка. */
+  private принял(userId: string, что: Что, track: MediaStreamTrack): void {
+    const было = this.раздачей.get(userId) ?? {
+      screen: new MediaStream(),
+      video: new MediaStream(),
+    };
+    this.раздачей.set(userId, было);
+
+    // Звук показа кладём в тот же поток, что и картинку: дальше он
+    // уходит в pipeScreen, а тому нужен один поток на показ.
+    const куда = что === "video" ? было.video : было.screen;
+    for (const прежняя of куда.getTracks()) {
+      if (прежняя.kind === track.kind) куда.removeTrack(прежняя);
+    }
+    куда.addTrack(track);
+    this.показать(userId);
+  }
+
+  /** Чужой поток кончился. */
+  private убрал(userId: string, что: Что): void {
+    const было = this.раздачей.get(userId);
+    if (!было) return;
+
+    if (что === "video") {
+      for (const track of было.video.getTracks()) было.video.removeTrack(track);
+    } else if (что === "screenAudio") {
+      for (const track of было.screen.getAudioTracks()) было.screen.removeTrack(track);
+    } else {
+      for (const track of было.screen.getTracks()) было.screen.removeTrack(track);
+    }
+
+    this.показать(userId);
+  }
+
+  /** Завести раздачу и подписаться на то, что уже идёт. */
+  private async поднятьРаздачу(): Promise<void> {
+    const socket = getSocket();
+    if (!socket) return;
+
+    this.sfu = new Раздача(
+      ({ userId, что, track }) => this.принял(userId, что, track),
+      (userId, что) => this.убрал(userId, что),
+    );
+
+    socket.on("sfu:producer", this.наПоток);
+    socket.on("sfu:producer-gone", this.наКонец);
+  }
+
+  /**
+   * Подхватить показы, которые идут в канале с нашего прихода.
+   *
+   * Отдельным шагом, и это важно. Разговор заводится раньше, чем
+   * сервер узнаёт, что мы в канале: сначала поднимается своя половина,
+   * и только потом уходит «я вошёл». Спросив «что сейчас идёт»
+   * до этого, мы получаем честное «ничего» — и человек, вошедший
+   * к уже показывающему другу, видит пустоту до тех пор, пока тот
+   * не выключит показ и не включит заново.
+   *
+   * Поэтому спрашиваем после того, как сервер подтвердил вход.
+   */
+  async подхватить(): Promise<void> {
+    if (!this.sfu) return;
+    if (await this.sfu.готова()) await this.sfu.догнать();
+  }
+
+  private наПоток = ({ producerId }: { producerId: string }) => {
+    void this.sfu?.принять(producerId);
+  };
+
+  private наКонец = ({ producerId, userId }: { producerId: string; userId: string }) => {
+    this.sfu?.убрать(producerId, userId);
+  };
 
   /** Что от кого сейчас отдано наверх — чтобы не дёргать интерфейс
    *  одним и тем же потоком по нескольку раз. */
@@ -1543,6 +1698,51 @@ class VoiceSession {
     const share = this.shares[kind];
     if (!share.stream || share.published) return;
     share.published = true;
+    void this.отдатьПоказ(kind);
+  }
+
+  /**
+   * Куда отправить свой показ: через раздачу или каждому отдельно.
+   *
+   * Сначала пробуем раздачу — ради неё всё и затевалось: картинка
+   * кодируется и уходит один раз вместо трёх. Не вышло — отправляем
+   * по-старому, каждому собеседнику свой поток. Человек разницы
+   * не замечает, кроме той, ради которой это делалось.
+   */
+  private async отдатьПоказ(kind: ShareKind): Promise<void> {
+    const share = this.shares[kind];
+    if (!share.stream) return;
+
+    const video = share.stream.getVideoTracks()[0];
+    if (video && this.sfu && (await this.sfu.готова())) {
+      const что: Что = kind === "screen" ? "screen" : "video";
+      // Через раздачу отдаём один раз, поэтому и делить полосу
+      // между собеседниками больше не нужно.
+      const потолок = kind === "screen" ? screenBitrate(1, this.screenNow) : VIDEO_BITRATE;
+
+      /*
+       * Со сроком. «Не завелось» бывает двух видов: честный отказ
+       * и молчание — когда дорога до сервера согласована, а соединиться
+       * по ней не выходит. Второе опаснее: без срока показ повисал бы
+       * навсегда, и человек видел бы включённую кнопку и чёрный
+       * прямоугольник у собеседников.
+       */
+      const вышло = await Promise.race([
+        this.sfu.отдать(video, что, потолок),
+        new Promise<boolean>((готово) => setTimeout(() => готово(false), SFU_ЖДЁМ)),
+      ]);
+
+      if (вышло) {
+        this.черезРаздачу.add(kind);
+
+        // Звук показа уходит той же дорогой: он часть показа, и делить
+        // их по разным путям значило бы получить рассинхрон.
+        const audio = kind === "screen" ? share.stream.getAudioTracks()[0] : undefined;
+        if (audio) await this.sfu.отдать(audio, "screenAudio", 0);
+        return;
+      }
+    }
+
     for (const [userId, peer] of this.peers) this.sendShareTo(userId, peer, kind);
   }
 
@@ -1599,6 +1799,12 @@ class VoiceSession {
   async stopShare(kind: ShareKind): Promise<void> {
     const share = this.shares[kind];
     if (!share.stream) return;
+
+    if (this.черезРаздачу.has(kind)) {
+      this.sfu?.прекратить(kind === "screen" ? "screen" : "video");
+      if (kind === "screen") this.sfu?.прекратить("screenAudio");
+      this.черезРаздачу.delete(kind);
+    }
 
     for (const [userId, senders] of share.senders) {
       const peer = this.peers.get(userId);
@@ -1672,6 +1878,15 @@ class VoiceSession {
   stop(): void {
     if (this.qualityTimer) clearInterval(this.qualityTimer);
     this.qualityTimer = null;
+
+    const socket = getSocket();
+    socket?.off("sfu:producer", this.наПоток);
+    socket?.off("sfu:producer-gone", this.наКонец);
+    this.sfu?.закрыть();
+    this.sfu = null;
+    this.раздачей.clear();
+    this.напрямую.clear();
+    this.черезРаздачу.clear();
     for (const kind of KINDS) void this.stopShare(kind);
     for (const userId of [...this.peers.keys()]) this.disconnect(userId);
     for (const track of this.mic?.getTracks() ?? []) track.stop();
@@ -1740,6 +1955,12 @@ class VoiceSession {
 let session: VoiceSession | null = null;
 
 export function currentSession(): VoiceSession | null {
+  // В разработке разговор доступен из консоли: window.__voice.
+  // Тем же пользуются сквозные проверки: заглянуть внутрь разговора
+  // иначе неоткуда, а гадать о его состоянии — плохая проверка.
+  if (import.meta.env?.DEV && typeof window !== "undefined") {
+    (window as unknown as { __voice: VoiceSession | null }).__voice = session;
+  }
   return session;
 }
 

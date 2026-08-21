@@ -288,6 +288,23 @@ export interface ServerToClientEvents {
    *  ходит напрямую между людьми, поэтому нагрузки на ноутбук
    *  от разговора почти нет. */
   "voice:signal": (data: { from: string; channelId: string; signal: VoiceSignal }) => void;
+
+  /**
+   * Раздача: в канале появился новый поток.
+   *
+   * Показ экрана идёт теперь не «каждому свой», а один раз на сервер —
+   * он и размножает. Здесь сервер зовёт остальных подписаться.
+   *
+   * Служебные подробности внутри намеренно не описаны: это разговор
+   * двух половин одной библиотеки, и мессенджеру в него лезть незачем.
+   */
+  "sfu:producer": (data: {
+    producerId: string;
+    userId: string;
+    что: "screen" | "screenAudio" | "video";
+  }) => void;
+  /** Поток кончился: человек прекратил показ или ушёл. */
+  "sfu:producer-gone": (data: { producerId: string; userId: string }) => void;
   "voice:state": (data: {
     channelId: string;
     userId: string;
@@ -342,6 +359,52 @@ export interface ClientToServerEvents {
    *  отдельным событием. */
   "voice:join": (data: { channelId: string }, ack?: (ok: boolean) => void) => void;
   "voice:leave": () => void;
+
+  /* ── Раздача картинки ─────────────────────────────────────────
+   *
+   * Подробности переговоров (возможности, ключи, параметры дорожек)
+   * ходят как есть: их читает библиотека раздачи, а не мессенджер.
+   * Описывать их здесь значило бы переписывать чужой словарь и
+   * ошибаться в нём при каждом обновлении. */
+  /** Умеет ли сервер раздавать и на каких условиях. null в ответе —
+   *  не умеет, показ пойдёт по-старому, каждому свой поток. */
+  "sfu:capabilities": (ack: (данные: unknown | null) => void) => void;
+  /** Дорога до сервера: "send" — чтобы показывать, "recv" — чтобы
+   *  смотреть. */
+  "sfu:transport": (
+    data: { куда: "send" | "recv" },
+    ack: (данные: unknown | null) => void,
+  ) => void;
+  /** Рукопожатие по этой дороге. */
+  "sfu:connect": (
+    data: { transportId: string; dtlsParameters: unknown },
+    ack: (вышло: boolean) => void,
+  ) => void;
+  /** Начать раздавать свой поток. */
+  "sfu:produce": (
+    data: {
+      transportId: string;
+      kind: "audio" | "video";
+      rtpParameters: unknown;
+      что: "screen" | "screenAudio" | "video";
+    },
+    ack: (producerId: string | null) => void,
+  ) => void;
+  /** Что уже раздаётся в канале — спрашивают при входе. */
+  "sfu:running": (
+    ack: (
+      потоки: { producerId: string; userId: string; что: "screen" | "screenAudio" | "video" }[],
+    ) => void,
+  ) => void;
+  /** Подписаться на чужой поток. */
+  "sfu:consume": (
+    data: { producerId: string; rtpCapabilities: unknown },
+    ack: (данные: unknown | null) => void,
+  ) => void;
+  /** Дорожка привязана — можно пускать кадры. */
+  "sfu:resume": (data: { consumerId: string }, ack: (вышло: boolean) => void) => void;
+  /** Прекратить раздачу своего потока. */
+  "sfu:stop": (data: { что: "screen" | "screenAudio" | "video" }) => void;
   "voice:signal": (data: { to: string; signal: VoiceSignal }) => void;
   /** deafened можно не присылать — тогда сервер считает, что звук
    *  включён. Так старый клиент, который про это поле не знает,
