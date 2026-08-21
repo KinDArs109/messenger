@@ -144,6 +144,13 @@ async function рабочий(): Promise<Worker | null> {
   }
 }
 
+/** Жива ли раздача прямо сейчас — без попыток её поднять.
+ *  Нужно проверке здоровья: она спрашивает часто, и будить ею
+ *  рабочего было бы странно. */
+export function раздачаЖива(): boolean {
+  return worker !== null && !worker.closed;
+}
+
 /** Есть ли раздача вообще. Клиент спрашивает это первым делом. */
 export async function раздачаЕсть(): Promise<boolean> {
   return (await рабочий()) !== null;

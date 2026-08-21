@@ -4,7 +4,10 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { prisma } from "./db/client.js";
+import { раздачаЖива } from "./realtime/sfu.js";
 import { env, isProduction } from "./config/env.js";
+import { CLIENT_DIST } from "./lib/paths.js";
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { authRouter } from "./modules/auth/router.js";
@@ -24,9 +27,10 @@ import { adminRouter } from "./modules/admin/router.js";
 import { uploadsServeRouter } from "./modules/uploads/serve.js";
 import { downloadRouter, landingHtml, updatesRouter } from "./modules/download/router.js";
 
-/** Собранный клиент. В разработке его нет — там работает Vite,
- *  который сам проксирует /api и /uploads на этот сервер. */
-const CLIENT_DIST = path.join(import.meta.dirname, "../../web/dist");
+/* Собранный клиент и загруженные файлы лежат в известных местах —
+   см. lib/paths.ts. Считать «отсюда два шага вверх» в каждом файле
+   нельзя: собранный сервер лежит не там, где исходный, и шаги
+   перестают сходиться. */
 
 export function createApp() {
   const app = express();
@@ -79,8 +83,43 @@ export function createApp() {
   app.use(express.json({ limit: "100kb" }));
   app.use(cookieParser());
 
-  app.get("/health", (_req, res) => {
-    res.json({ ok: true, uptime: process.uptime() });
+  /**
+   * Здоровье — то, что и правда важно, а не «процесс жив».
+   *
+   * Раньше здесь всегда стоял ok:true. Сторож, который спрашивает
+   * это раз в минуту, был слеп к самой частой беде: мессенджер
+   * отвечает, а база недоступна — то есть ни войти, ни прочитать
+   * переписку нельзя, и никто об этом не узнает, пока не пожалуются
+   * друзья.
+   *
+   * Теперь ответ честный: без базы это 503, и сторож поднимает
+   * тревогу сам. Про раздачу говорим отдельно — без неё мессенджер
+   * работает, просто показ идёт дороже, и будить из-за неё ночью
+   * никого не надо.
+   */
+  app.get("/health", async (_req, res) => {
+    const началось = Date.now();
+    let база = false;
+
+    try {
+      // Со сроком: висящая база не должна превращать проверку
+      // здоровья в ещё одно место, которое молчит.
+      await Promise.race([
+        prisma.$queryRaw`SELECT 1`,
+        new Promise((_, беда) => setTimeout(() => беда(new Error("не дождались")), 3000)),
+      ]);
+      база = true;
+    } catch {
+      база = false;
+    }
+
+    res.status(база ? 200 : 503).json({
+      ok: база,
+      база,
+      раздача: раздачаЖива(),
+      ответ: Date.now() - началось,
+      uptime: process.uptime(),
+    });
   });
 
   // Сначала опознаём, потом считаем: иначе общий потолок считается

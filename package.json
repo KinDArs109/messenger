@@ -49,7 +49,12 @@
     "check:adapt": "npm run check:adapt -w @messenger/web",
     "check:sfu": "npm run check:sfu -w @messenger/desktop",
     "check:sfu-server": "npm run check:sfu-server -w @messenger/server",
-    "check:capture": "npm run check:capture -w @messenger/desktop"
+    "check:capture": "npm run check:capture -w @messenger/desktop",
+    "check": "node scripts/check-all.mjs",
+    "check:login": "npm run check:login -w @messenger/server",
+    "check:signup": "npm run check:signup -w @messenger/server",
+    "check:verify": "npm run check:verify -w @messenger/server",
+    "check:idle": "npm run check:idle -w @messenger/server"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",

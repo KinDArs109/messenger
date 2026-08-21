@@ -1,5 +1,6 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { UPLOADS_DIR } from "./paths.js";
 import sharp from "sharp";
 import { newId } from "./ids.js";
 
@@ -10,7 +11,7 @@ import { newId } from "./ids.js";
  *  только этот файл: во всём остальном коде фигурирует storageKey,
  *  а не путь. */
 
-export const UPLOADS_DIR = path.join(import.meta.dirname, "../../uploads");
+export { UPLOADS_DIR } from "./paths.js";
 
 /** Разрешённые к показу прямо в ленте типы. Всё остальное отдаётся
  *  только как загрузка: браузер не должен исполнять в нашем домене

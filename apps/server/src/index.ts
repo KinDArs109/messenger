@@ -6,6 +6,7 @@ import { setRealtime } from "./realtime/emitter.js";
 import { prisma } from "./db/client.js";
 import { TurnServer, localIPv4, setTurnServer } from "./turn/server.js";
 import { раздачаЕсть } from "./realtime/sfu.js";
+import { UPLOADS_DIR } from "./lib/paths.js";
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -48,6 +49,9 @@ httpServer.listen(env.PORT, () => {
 
   console.log(`  Режим:   ${env.NODE_ENV}`);
   console.log(`  API:     http://localhost:${env.PORT}`);
+  // Где лежат файлы — вслух. Уехавший путь иначе замечают только
+  // по пропавшим аватаркам, и не в тот же день.
+  console.log(`  Файлы:   ${UPLOADS_DIR}`);
   // В продакшене клиент отдаёт этот же процесс, в разработке — Vite.
   console.log(
     `  Клиент:  ${isProduction ? `http://localhost:${env.PORT}` : env.CLIENT_ORIGIN}`,
@@ -88,6 +92,9 @@ httpServer.listen(env.PORT, () => {
  *  перезапуске будет оставлять висящие подключения к Postgres. */
 async function shutdown(signal: string) {
   console.log(`\n  ${signal} — останавливаюсь...`);
+  // Сколько бы ни длилось прощание, дольше пяти секунд оно не идёт:
+  // перезапуск — это оборванные разговоры, и растягивать его нельзя.
+  setTimeout(() => process.exit(0), 5000).unref();
   io.close();
   httpServer.close();
   await turn?.stop();
@@ -97,3 +104,31 @@ async function shutdown(signal: string) {
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+/*
+ * Страховка от необработанных ошибок.
+ *
+ * Узел по умолчанию убивает процесс за любое необработанное обещание.
+ * Для мессенджера, в котором четверо сидят в разговоре, это скверный
+ * размен: одна забытая проверка где-нибудь в отправке уведомления
+ * обрывает всем голос. Систему это, конечно, поднимет через три
+ * секунды — но разговор уже разорван.
+ *
+ * Поэтому разделяем. Необработанное обещание — записываем и живём
+ * дальше: почти всегда это частный случай, а не сломанный процесс.
+ * А вот необработанное исключение оставляет процесс в неизвестном
+ * состоянии — тут честнее уйти и дать себя перезапустить, но сначала
+ * записать, из-за чего.
+ */
+process.on("unhandledRejection", (беда) => {
+  console.error(
+    "  Необработанное обещание:",
+    беда instanceof Error ? (беда.stack ?? беда.message) : беда,
+  );
+});
+
+process.on("uncaughtException", (беда) => {
+  console.error("  Необработанное исключение:", беда.stack ?? беда.message);
+  // Даём журналу записаться и уходим: систему перезапустит нас сама.
+  setTimeout(() => process.exit(1), 200).unref();
+});
