@@ -52,6 +52,10 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
    *  так». Здесь ровно то, что разводит их по разным сторонам:
    *  есть ли дорожка вообще, жива ли она и идут ли по ней данные. */
   const [detail, setDetail] = useState("");
+  /** Что приходит на самом деле: размер кадра и сколько их в секунду.
+   *  Человеку это нужно ровно тогда, когда картинка не нравится:
+   *  «мыльно» и «дёргается» — разные беды с разными причинами. */
+  const [качество, setКачество] = useState<{ height: number; fps: number } | null>(null);
 
   useEffect(() => {
     const element = video.current;
@@ -134,6 +138,11 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
       }
 
       const кадры = element.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+      // Кадры за прошедшую секунду и размер того, что пришло.
+      // Считается здесь же: сторож и так тикает раз в секунду.
+      if (прежние >= 0 && element.videoHeight > 0) {
+        setКачество({ height: element.videoHeight, fps: Math.max(0, кадры - прежние) });
+      }
       простой = кадры > прежние ? 0 : простой + 1;
       прежние = кадры;
       // Пять секунд подряд без единого нового кадра — это уже не задержка.
@@ -277,6 +286,10 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
               ? "Ваш экран"
               : "Ваша камера"
             : `Показывает · ${user?.displayName ?? "участник"}`}
+          {/* Что дошло на самом деле. Своё не подписываем: у себя это
+              не «дошло», а «отдаётся», и число там другое — оно
+              в полосе над показом. */}
+          {!own && качество && ` · ${качество.height}p, ${качество.fps} к/с`}
         </div>
       )}
 

@@ -22,6 +22,17 @@ import { getSocket } from "./socket";
 
 export type Что = "screen" | "screenAudio" | "video";
 
+/** Как идёт наша отдача. Байты и время — чтобы посчитать скорость:
+ *  сама по себе она в статистике не лежит, её считают по разнице. */
+export interface Отдача {
+  fps: number | null;
+  предел: "cpu" | "bandwidth" | null;
+  width: number | null;
+  height: number | null;
+  байт: number | null;
+  когда: number;
+}
+
 /** Что приехало от собеседника. Дорожки одного показа приезжают
  *  порознь — картинка отдельно, звук отдельно, — и собирает их
  *  в один поток тот, кто выше. */
@@ -223,6 +234,28 @@ export class Раздача {
       this.producers.get(что)?.close();
       this.producers.set(что, producer);
       producer.on("transportclose", () => this.producers.delete(что));
+
+      /*
+       * Чем жертвовать, когда тесно, — решаем мы, а не браузер.
+       *
+       * Браузер, предоставленный сам себе, для показа экрана бережёт
+       * чёткость и роняет кадры: он считает, что показывают текст.
+       * Для игры это ровно наоборот. Размером при нехватке жертвует
+       * мессенджер — сам, ступенями и не вслепую (см. lib/adapt.ts), —
+       * а кодировщику остаётся держать частоту.
+       */
+      if (track.kind === "video") {
+        try {
+          const параметры = producer.rtpSender?.getParameters();
+          if (параметры) {
+            параметры.degradationPreference = "maintain-framerate";
+            await producer.rtpSender?.setParameters(параметры);
+          }
+        } catch {
+          // Не приняли — не беда: это подсказка, а не условие.
+        }
+      }
+
       return true;
     } catch {
       return false;
@@ -252,25 +285,32 @@ export class Раздача {
    * Это и есть та самая экономия, ради которой всё делалось: считать
    * стало нечего, потому что поток один.
    */
-  async какИдёт(
-    что: Что,
-  ): Promise<{ fps: number | null; предел: "cpu" | "bandwidth" | null } | null> {
+  async какИдёт(что: Что): Promise<Отдача | null> {
     const producer = this.producers.get(что);
     if (!producer || producer.closed) return null;
 
     try {
       const записи = await producer.getStats();
-      let fps: number | null = null;
-      let предел: "cpu" | "bandwidth" | null = null;
+      const итог: Отдача = {
+        fps: null,
+        предел: null,
+        width: null,
+        height: null,
+        байт: null,
+        когда: performance.now(),
+      };
 
       записи.forEach((запись: Record<string, unknown>) => {
         if (запись.type !== "outbound-rtp" || запись.kind !== "video") return;
-        if (typeof запись.framesPerSecond === "number") fps = запись.framesPerSecond;
+        if (typeof запись.framesPerSecond === "number") итог.fps = запись.framesPerSecond;
+        if (typeof запись.frameWidth === "number") итог.width = запись.frameWidth;
+        if (typeof запись.frameHeight === "number") итог.height = запись.frameHeight;
+        if (typeof запись.bytesSent === "number") итог.байт = запись.bytesSent;
         const почему = запись.qualityLimitationReason;
-        if (почему === "cpu" || почему === "bandwidth") предел = почему;
+        if (почему === "cpu" || почему === "bandwidth") итог.предел = почему;
       });
 
-      return { fps, предел };
+      return итог;
     } catch {
       return null;
     }

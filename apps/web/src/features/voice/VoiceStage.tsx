@@ -409,40 +409,44 @@ function VideoTile({ stream, own }: { stream: MediaStream; own: boolean }) {
  * разный.
  */
 function ScreenTrouble() {
-  const trouble = useStore((s) => s.screenTrouble);
+  const как = useStore((s) => s.screenStats);
   const scaled = useStore((s) => s.screenScaled);
-  if (!trouble && scaled === null) return null;
-
-  const кадры = trouble?.fps == null ? "" : ` Сейчас доходит ${trouble.fps} к/с.`;
+  if (!как) return null;
 
   /*
-   * Про понижение говорим первым делом, и вот почему.
+   * Числа, а не «всё хорошо».
    *
-   * Опустить картинку ради кадров — это наше решение, а не поломка:
-   * дёргающийся экран бесполезен, замыленный — нет. Но принято оно
-   * за человека, и он вправе знать, что размер уменьшили мы, а не
-   * «что-то сломалось».
+   * «Плохое качество» — жалоба, по которой нельзя ничего починить:
+   * плохо бывает от размера, от кадров, от полосы и от того, что
+   * картинка пошла не той дорогой. Здесь мессенджер говорит прямо,
+   * что у него происходит: и человеку спокойнее, и чинить есть что.
    */
-  if (scaled !== null) {
-    return (
-      <div
-        role="status"
-        className="mx-3 mb-2 shrink-0 rounded-md bg-raised px-3 py-2 text-xs leading-snug text-muted"
-      >
-        Держу плавность: опустил показ до {scaled}p, иначе кадры сыплются.{кадры} Вернётся само,
-        когда станет свободнее.
-      </div>
-    );
+  const части: string[] = [];
+  if (как.height) части.push(`${как.height}p`);
+  if (как.fps !== null) части.push(`${как.fps} к/с`);
+  if (как.мбит !== null && как.мбит > 0.05) {
+    части.push(`${как.мбит.toFixed(1).replace(".", ",")} Мбит/с`);
   }
+  части.push(как.черезСервер ? "через сервер" : "напрямую каждому");
+
+  const беда =
+    как.предел === "cpu"
+      ? "компьютер не успевает сжимать"
+      : как.предел === "bandwidth"
+        ? "не хватает канала"
+        : null;
 
   return (
     <div
       role="status"
-      className="mx-3 mb-2 shrink-0 rounded-md bg-idle/10 px-3 py-2 text-xs leading-snug text-idle"
+      className={cn(
+        "mx-3 mb-2 shrink-0 rounded-md px-3 py-2 text-xs leading-snug",
+        беда ? "bg-idle/10 text-idle" : "bg-raised text-muted",
+      )}
     >
-      {trouble?.reason === "cpu"
-        ? `Компьютер не успевает сжимать картинку, и собеседникам она идёт урезанной.${кадры} Поможет меньше кадров — настройки, «Голос».`
-        : `Канала не хватает, и картинка идёт урезанной.${кадры} Поможет меньшее разрешение — настройки, «Голос».`}
+      Показ: {части.join(" · ")}
+      {scaled !== null && ` · опустил до ${scaled}p ради кадров`}
+      {беда && ` · ${беда}`}
     </div>
   );
 }

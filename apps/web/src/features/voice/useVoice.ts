@@ -77,7 +77,7 @@ export function useVoice() {
             useStore.getState().setVoicePing(rtt, toServer, viaRelay),
           onScreen: (userId, screen) => useStore.getState().setVoiceScreen(userId, screen),
           onVideo: (userId, video) => useStore.getState().setVoiceVideo(userId, video),
-          onScreenTrouble: (reason, fps) => useStore.getState().setScreenTrouble(reason, fps),
+          onScreenStats: (как) => useStore.getState().setScreenStats(как),
           onScreenScaled: (height) => useStore.getState().setScreenScaled(height),
         });
 

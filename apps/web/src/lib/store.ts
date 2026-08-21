@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { ПоказИдёт } from "./voice";
 import { create } from "zustand";
 import type {
   DmChannelDto,
@@ -168,8 +169,10 @@ interface State {
   setVoicePing: (ping: number | null, toServer?: boolean, viaRelay?: boolean) => void;
   /** Своя демонстрация не тянет: кодировщик режет картинку.
    *  "cpu" — не хватает компьютера, "bandwidth" — канала. */
-  screenTrouble: { reason: "cpu" | "bandwidth"; fps: number | null } | null;
-  setScreenTrouble: (reason: "cpu" | "bandwidth" | null, fps: number | null) => void;
+  /** Как идёт наш показ: размер, кадры, скорость и каким путём.
+   *  null — мы ничего не показываем. */
+  screenStats: ПоказИдёт | null;
+  setScreenStats: (как: ПоказИдёт | null) => void;
   /** До какой высоты мессенджер сам опустил наш показ, чтобы удержать
    *  кадры. null — показ идёт как выбрано. */
   screenScaled: number | null;
@@ -390,9 +393,8 @@ export const useStore = create<State>((set, get) => ({
   setVoicePing: (voicePing, voicePingToServer = false, voiceViaRelay = false) =>
     set({ voicePing, voicePingToServer, voiceViaRelay }),
 
-  screenTrouble: null,
-  setScreenTrouble: (reason, fps) =>
-    set({ screenTrouble: reason === null ? null : { reason, fps } }),
+  screenStats: null,
+  setScreenStats: (screenStats) => set({ screenStats }),
 
   screenScaled: null,
   setScreenScaled: (screenScaled) => {

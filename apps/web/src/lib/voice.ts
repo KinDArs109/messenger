@@ -83,7 +83,16 @@ export interface VoiceEvents {
    *
    *  Нужно, чтобы человек не гадал, почему у друга дёргается: раньше
    *  об этом можно было узнать только по жалобе собеседника. */
-  onScreenTrouble: (reason: "cpu" | "bandwidth" | null, fps: number | null) => void;
+  /**
+   * Как идёт наш показ — числами, а не на глаз.
+   *
+   * «Плохое качество» — жалоба, по которой нельзя ничего починить:
+   * плохо бывает от размера, от кадров, от полосы и от того, что
+   * картинка вообще пошла не той дорогой. Поэтому мессенджер говорит
+   * прямо, что именно у него сейчас происходит, — и человеку, и тому,
+   * кто будет это чинить.
+   */
+  onScreenStats: (как: ПоказИдёт | null) => void;
   /** Мессенджер сам опустил показ, чтобы удержать кадры: высота, до
    *  которой опустил, или null — если показ идёт как выбрано. */
   onScreenScaled: (height: number | null) => void;
@@ -353,6 +362,20 @@ interface Piped {
    *  через усилитель устройство меняется у всего разом. */
   reroute(): Promise<void>;
   stop(): void;
+}
+
+/** Что показать человеку о его же показе. */
+export interface ПоказИдёт {
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  /** Мегабит в секунду — то, что и правда уходит. */
+  мбит: number | null;
+  предел: "cpu" | "bandwidth" | null;
+  /** Через сервер (раздача) или напрямую каждому. */
+  черезСервер: boolean;
+  /** Сколько собеседников получают картинку. */
+  зрителей: number;
 }
 
 interface Peer {
@@ -866,7 +889,7 @@ class VoiceSession {
    */
   private async checkScreen(): Promise<void> {
     if (!this.shares.screen.stream) {
-      this.events.onScreenTrouble(null, null);
+      this.events.onScreenStats(null);
       // Показ кончился — и наши ступени вместе с ним. Иначе полоса
       // «опустил показ до 720p» висела бы над пустым местом.
       if (this.screenAdapt.шаг !== 0 || this.screenNow !== null) {
@@ -874,27 +897,65 @@ class VoiceSession {
         this.screenNow = null;
         this.events.onScreenScaled(null);
       }
+      this.прежняяОтдача = null;
       return;
     }
 
-    /*
-     * Через раздачу поток один — у него и спрашиваем.
-     *
-     * Раньше приходилось брать худшее из соединений: их было столько
-     * же, сколько собеседников. Теперь соединение одно, и «худший
-     * из» превратилось в «единственный».
-     */
-    if (this.черезРаздачу.has("screen")) {
-      const как = await this.sfu?.какИдёт("screen");
-      const кадры = как?.fps ?? null;
-      this.events.onScreenTrouble(как?.предел ?? null, кадры === null ? null : Math.round(кадры));
-      await this.adaptScreen(кадры);
-      return;
-    }
+    const как = this.черезРаздачу.has("screen")
+      ? await this.черезРаздачуИдёт()
+      : await this.напрямуюИдёт();
 
+    this.events.onScreenStats(как);
+    await this.adaptScreen(как?.fps ?? null, как?.предел ?? null);
+  }
+
+  /** Прошлый замер отдачи — по нему считаем скорость: сама по себе
+   *  она в статистике не лежит. */
+  private прежняяОтдача: { байт: number; когда: number } | null = null;
+
+  /** Скорость по разнице с прошлым замером. */
+  private скорость(байт: number | null, когда: number): number | null {
+    if (байт === null) return null;
+    const прежде = this.прежняяОтдача;
+    this.прежняяОтдача = { байт, когда };
+    if (!прежде || когда <= прежде.когда) return null;
+    const секунд = (когда - прежде.когда) / 1000;
+    return ((байт - прежде.байт) * 8) / секунд / 1e6;
+  }
+
+  /**
+   * Через раздачу поток один — у него и спрашиваем.
+   *
+   * Раньше приходилось брать худшее из соединений: их было столько же,
+   * сколько собеседников. Теперь соединение одно, и «худший из»
+   * превратилось в «единственный».
+   */
+  private async черезРаздачуИдёт(): Promise<ПоказИдёт | null> {
+    const как = await this.sfu?.какИдёт("screen");
+    if (!как) return null;
+
+    return {
+      width: как.width,
+      height: как.height,
+      fps: как.fps === null ? null : Math.round(как.fps),
+      мбит: this.скорость(как.байт, как.когда),
+      предел: как.предел,
+      черезСервер: true,
+      зрителей: this.peers.size,
+    };
+  }
+
+  /** Прежний путь: у каждого собеседника своя картинка, и берём
+   *  худшее — если хоть одному достаётся урезанная, показывать
+   *  «всё хорошо» нечестно. */
+  private async напрямуюИдёт(): Promise<ПоказИдёт | null> {
     let reason: "cpu" | "bandwidth" | null = null;
     let fps: number | null = null;
     let лучший: number | null = null;
+    let width: number | null = null;
+    let height: number | null = null;
+    let байт = 0;
+    let было = false;
 
     for (const peer of this.peers.values()) {
       if (peer.connection.connectionState !== "connected") continue;
@@ -904,21 +965,27 @@ class VoiceSession {
         const outbound = report as RTCOutboundRtpStreamStats & {
           qualityLimitationReason?: string;
           framesPerSecond?: number;
+          frameWidth?: number;
+          frameHeight?: number;
         };
         if (outbound.kind !== "video") continue;
+        было = true;
 
-        // Кадров у экрана заметно больше, чем у камеры, — так их
-        // и различаем, не заводя отдельного учёта отправителей.
         if (typeof outbound.framesPerSecond === "number") {
           fps = fps === null ? outbound.framesPerSecond : Math.min(fps, outbound.framesPerSecond);
-          лучший = лучший === null ? outbound.framesPerSecond : Math.max(лучший, outbound.framesPerSecond);
+          лучший =
+            лучший === null ? outbound.framesPerSecond : Math.max(лучший, outbound.framesPerSecond);
         }
+        if (typeof outbound.frameWidth === "number") width = outbound.frameWidth;
+        if (typeof outbound.frameHeight === "number") height = outbound.frameHeight;
+        байт += outbound.bytesSent ?? 0;
+
         const why = outbound.qualityLimitationReason;
         if (why === "cpu" || why === "bandwidth") reason = why;
       }
     }
 
-    this.events.onScreenTrouble(reason, fps === null ? null : Math.round(fps));
+    if (!было) return null;
 
     /*
      * Опускаться решаем по лучшему из собеседников, а не по худшему.
@@ -926,9 +993,16 @@ class VoiceSession {
      * Картинку кодируем каждому свою, а захват один на всех: опустив
      * его, мы опустим показ сразу всем. Если тяжело одному — это его
      * канал, и браузер урежет ему картинку сам, не трогая остальных.
-     * А вот если плохо даже лучшему — дело в нас, и вот тогда пора.
      */
-    await this.adaptScreen(лучший);
+    return {
+      width,
+      height,
+      fps: лучший === null ? null : Math.round(лучший),
+      мбит: this.скорость(байт, performance.now()),
+      предел: reason,
+      черезСервер: false,
+      зрителей: this.peers.size,
+    };
   }
 
   /**
@@ -945,12 +1019,15 @@ class VoiceSession {
    * Возвращаемся наверх медленно и только когда всё спокойно — иначе
    * показ прыгал бы туда-сюда на каждой просадке.
    */
-  private async adaptScreen(fps: number | null): Promise<void> {
+  private async adaptScreen(
+    fps: number | null,
+    предел: "cpu" | "bandwidth" | null,
+  ): Promise<void> {
     const track = this.shares.screen.stream?.getVideoTracks()[0];
     if (!track || track.readyState !== "live") return;
 
     const было = this.screenAdapt;
-    this.screenAdapt = решить(было, fps, getPreferences().screenFps);
+    this.screenAdapt = решить(было, { fps, предел }, getPreferences().screenFps);
     if (this.screenAdapt.шаг !== было.шаг) await this.applyScreenStep(track);
   }
 

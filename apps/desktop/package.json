@@ -21,7 +21,8 @@
     "check:undressed": "electron scripts/check-undressed.cjs",
     "check:share": "electron scripts/check-share.cjs",
     "check:codec": "electron scripts/check-codec.cjs",
-    "check:sfu": "electron scripts/check-sfu.cjs"
+    "check:sfu": "electron scripts/check-sfu.cjs",
+    "check:capture": "electron scripts/check-capture.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",

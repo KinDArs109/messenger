@@ -48,7 +48,8 @@
     "check:codec": "npm run check:codec -w @messenger/desktop",
     "check:adapt": "npm run check:adapt -w @messenger/web",
     "check:sfu": "npm run check:sfu -w @messenger/desktop",
-    "check:sfu-server": "npm run check:sfu-server -w @messenger/server"
+    "check:sfu-server": "npm run check:sfu-server -w @messenger/server",
+    "check:capture": "npm run check:capture -w @messenger/desktop"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",
