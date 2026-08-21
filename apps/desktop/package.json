@@ -18,7 +18,9 @@
     "check:steam": "electron scripts/check-steam.cjs",
     "check:screens": "electron scripts/check-screens.cjs",
     "check:poison": "electron scripts/check-poison.cjs",
-    "check:undressed": "electron scripts/check-undressed.cjs"
+    "check:undressed": "electron scripts/check-undressed.cjs",
+    "check:share": "electron scripts/check-share.cjs",
+    "check:codec": "electron scripts/check-codec.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",

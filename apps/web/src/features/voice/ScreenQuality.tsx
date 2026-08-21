@@ -27,7 +27,8 @@ interface Preset {
 }
 
 const PRESETS: Preset[] = [
-  { label: "Игра", note: "плавнее — 720p, 60 к/с", height: 720, fps: 60 },
+  { label: "Игра", note: "плавнее — 1080p, 60 к/с", height: 1080, fps: 60 },
+  { label: "Разговор", note: "поровну — 1080p, 30 к/с", height: 1080, fps: 30 },
   { label: "Текст", note: "чётче — 1080p, 15 к/с", height: 1080, fps: 15 },
 ];
 
@@ -44,7 +45,7 @@ const RATES: Preferences["screenFps"][] = [15, 30, 60];
  *  происходит на самом деле, иначе она хуже, чем никакой. */
 function мегабиты(height: number, fps: number): string {
   const h = height > 0 ? height : 1080;
-  const value = Math.min(6, (h * h * (16 / 9) * fps * 2.5) / (1080 * 1920 * 30));
+  const value = Math.min(8, (h * h * (16 / 9) * fps * 5) / (1080 * 1920 * 30));
   return value.toFixed(1).replace(".", ",");
 }
 
@@ -82,7 +83,9 @@ export function ScreenQuality() {
           {preset?.note.split("—")[1]?.trim() ??
             `${heightLabel(prefs.screenHeight)}, ${prefs.screenFps} к/с`}
           {" · "}
-          {мегабиты(prefs.screenHeight, prefs.screenFps)} Мбит/с
+          {/* На одного: в разговоре вчетвером картинка уходит трижды,
+              каждому своя. Общий потолок держит сам мессенджер. */}
+          до {мегабиты(prefs.screenHeight, prefs.screenFps)} Мбит/с на друга
         </p>
       </div>
 

@@ -4,6 +4,7 @@ import { Maximize2, Minimize2, Play } from "lucide-react";
 import { desktop } from "@/lib/desktop";
 import { usePeople, useStore } from "@/lib/store";
 import { canShareScreen } from "@/lib/voice";
+import { ScreenVolume } from "./ScreenVolume";
 
 /**
  * Чужой экран.
@@ -18,6 +19,22 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
   const me = useStore((s) => s.me);
   const user = usePeople()(userId);
   const own = userId === me?.id;
+
+  /* Есть ли в показе звук. Ползунку громкости иначе нечем управлять,
+     а показывать его при немом показе — обещать то, чего нет.
+     Следим, а не смотрим один раз: звуковая дорожка приезжает
+     отдельно от картинки и часто позже. */
+  const [соЗвуком, setСоЗвуком] = useState(stream.getAudioTracks().length > 0);
+  useEffect(() => {
+    const пересчитать = () => setСоЗвуком(stream.getAudioTracks().length > 0);
+    пересчитать();
+    stream.addEventListener("addtrack", пересчитать);
+    stream.addEventListener("removetrack", пересчитать);
+    return () => {
+      stream.removeEventListener("addtrack", пересчитать);
+      stream.removeEventListener("removetrack", пересчитать);
+    };
+  }, [stream]);
 
   /** Смотрим ли мы этот показ.
    *
@@ -298,6 +315,14 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
           </p>
           {detail && <p className="mt-1 font-mono text-[11px] text-faint">{detail}</p>}
         </div>
+      )}
+
+      {/* Громкость показа — своя, отдельно от голоса показывающего.
+          Игра ревёт, а человека из-за неё не слышно — это две разные
+          беды, и лечатся они порознь. Своё показывать нечего: свой
+          звук мы и так слышим из динамиков. */}
+      {watching && !own && соЗвуком && (
+        <ScreenVolume userId={userId} name={user?.displayName ?? "участник"} big={big} />
       )}
 
       {/* Отдельная кнопка, а не только нажатие по кадру: по кадру

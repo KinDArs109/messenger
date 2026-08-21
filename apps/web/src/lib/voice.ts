@@ -3,6 +3,7 @@ import { api } from "./api";
 import { isApp } from "./desktop";
 import { guardScreenAudio, type EchoGuard } from "./echo";
 import { getPreferences } from "./preferences";
+import { просимH264 } from "./codecs";
 import { SpeechGate, rmsOf } from "./speaking";
 import { getSocket } from "./socket";
 
@@ -105,16 +106,45 @@ export interface VoiceEvents {
  * чтобы привычные 1080p при тридцати кадрах давали прежние два
  * с половиной мегабита — на них всё было настроено и проверено.
  */
-function screenBitrate(): number {
+/**
+ * Сколько битов в секунду отдавать под экран — на одного собеседника.
+ *
+ * Число подобрано замером, а не на глаз: apps/desktop/scripts/check-share.cjs
+ * гоняет ту же картинку в три соединения сразу и показывает, что
+ * кодировщик делает с кадром при разной полосе. Оказалось, что скупость
+ * здесь выходит боком: при полутора мегабитах кодировщик не «слегка
+ * мылит», а режет 1080p до 640×360 — то самое «плохое качество», на
+ * которое жалуются. При пяти он держит родной размер и ни во что
+ * не упирается.
+ *
+ * Коэффициент считан от этого замера: 1080p при тридцати кадрах — пять
+ * мегабит. Отсюда 720p30 — два с половиной, 720p60 — четыре с половиной,
+ * 1080p15 — два с половиной.
+ */
+function screenBitrate(peers = 1): number {
   const { screenHeight, screenFps } = getPreferences();
   // Ноль означает «как есть»; считаем по самому частому экрану.
   const height = screenHeight > 0 ? screenHeight : 1080;
   const pixels = height * (height * (16 / 9));
-  const base = 2_500_000 / (1080 * 1920 * 30);
-  // Потолок в шесть мегабит: выше начинается не «чётче», а «канал
-  // друга не выдержал», и картинка сыплется у него, а не у нас.
-  return Math.min(6_000_000, Math.round(pixels * screenFps * base));
+  const base = 5_000_000 / (1080 * 1920 * 30);
+
+  /*
+   * Потолок на всю отдачу, а не на каждого.
+   *
+   * В сети «каждый с каждым» картинка уходит столько раз, сколько
+   * собеседников: вчетвером — трижды. Восемь мегабит на каждого
+   * означали бы двадцать четыре с одного домашнего канала, а столько
+   * вверх не отдаёт почти никто. Браузер, конечно, сам опустится
+   * до того, что проходит, — но опускается он через несколько секунд
+   * рваной картинки, и лучше в них не входить вовсе.
+   */
+  const своё = Math.min(8_000_000, Math.round(pixels * screenFps * base));
+  const общий = Math.round(12_000_000 / Math.max(1, peers));
+  // Полтора мегабита — нижняя граница, ниже которой смысла в показе
+  // уже нет: там не «хуже видно», там не видно.
+  return Math.max(1_500_000, Math.min(своё, общий));
 }
+
 
 /** Камера скромнее экрана намеренно. Соединений «каждый с каждым»
  *  столько же, сколько собеседников, и своё лицо уходит в сеть
@@ -663,6 +693,24 @@ class VoiceSession {
     return prefs.userGain[userId] ?? 1;
   }
 
+  /**
+   * Громкость чужого показа — своя, отдельно от голоса.
+   *
+   * Голос и игра приходят от одного человека, но слушают их
+   * по-разному: голос надо слышать всегда, а игру — ровно настолько,
+   * чтобы понимать, что происходит на экране. Раньше ползунок был
+   * один на оба, и когда у показывающего ревела игра, выбор был
+   * скверный: терпеть или заглушить человека вместе с ним.
+   *
+   * Заглушённый молчит целиком: «заглушить» должно означать тишину,
+   * а не тишину наполовину.
+   */
+  private screenGainFor(userId: string): number {
+    const prefs = getPreferences();
+    if (prefs.mutedUsers.includes(userId)) return 0;
+    return prefs.screenGain[userId] ?? 1;
+  }
+
   /** Применить настройки громкости ко всему, что сейчас звучит.
    *  Вызывается на каждое движение любого ползунка. */
   applyVolumes(): void {
@@ -679,10 +727,10 @@ class VoiceSession {
         peer.audio.volume = Math.min(1, personal * prefs.outputGain);
         peer.audio.muted = this.deafened;
       }
-      // Звук показа слушается тех же ползунков, что и голос: заглушили
-      // человека — замолкает и его игра. Иначе «заглушить» означало бы
-      // «заглушить наполовину», а это хуже, чем не иметь кнопки.
-      peer.screen?.apply(personal, prefs.outputGain, this.deafened);
+      // У показа свой ползунок: игра ревёт, а голос из-за неё не слышно —
+      // это две разные беды, и лечатся они порознь. Кнопка «заглушить»
+      // по-прежнему гасит человека целиком, вместе с его игрой.
+      peer.screen?.apply(this.screenGainFor(userId), prefs.outputGain, this.deafened);
     }
   }
 
@@ -1078,7 +1126,7 @@ class VoiceSession {
 
       const source = this.context.createMediaStreamSource(stream);
       const gain = this.context.createGain();
-      gain.gain.value = this.gainFor(userId);
+      gain.gain.value = this.screenGainFor(userId);
       source.connect(gain).connect(this.master);
       volume = { gain, source };
     };
@@ -1298,6 +1346,18 @@ class VoiceSession {
       return null;
     }
 
+    /*
+     * Подсказка кодировщику, что это за картинка.
+     *
+     * Без неё браузер считает показ экрана текстом и бережёт чёткость
+     * ценой кадров — для игры это ровно наоборот. Тексту и таблицам
+     * (пятнадцать кадров) оставляем чёткость, всему остальному —
+     * плавность.
+     */
+    for (const track of display.getVideoTracks()) {
+      track.contentHint = screenFps >= 30 ? "motion" : "text";
+    }
+
     this.adopt("screen", display);
     await this.guardScreen(display);
     return display.id;
@@ -1399,7 +1459,12 @@ class VoiceSession {
     for (const track of share.stream.getTracks()) {
       const sender = peer.connection.addTrack(track, share.stream);
       senders.push(sender);
-      if (track.kind === "video") void this.limitVideo(sender, kind);
+      if (track.kind === "video") {
+        // Порядок важен: список кодеков переставляем до того, как
+        // соединение начнёт договариваться, иначе просьба опоздает.
+        if (kind === "screen") просимH264(peer.connection, sender);
+        void this.limitVideo(sender, kind);
+      }
     }
 
     share.senders.set(userId, senders);
@@ -1426,7 +1491,7 @@ class VoiceSession {
         (encoding) => ({
           ...encoding,
           maxFramerate: screen ? screenFps : VIDEO_FPS,
-          maxBitrate: screen ? screenBitrate() : VIDEO_BITRATE,
+          maxBitrate: screen ? screenBitrate(this.peers.size) : VIDEO_BITRATE,
         }),
       );
       await sender.setParameters(parameters);

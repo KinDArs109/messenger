@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { VolumeX, Volume2 } from "lucide-react";
 import { MAX_USER_GAIN, usePreferences } from "@/lib/preferences";
-import { setUserVolume, toggleUserMuted } from "./useVoice";
+import { useStore } from "@/lib/store";
+import { setScreenVolume, setUserVolume, toggleUserMuted } from "./useVoice";
 
 /**
  * Громкость собеседника — по правой кнопке на нём, как в дискорде.
@@ -27,6 +28,10 @@ export function UserVolumeMenu({
   const box = useRef<HTMLDivElement>(null);
   const muted = prefs.mutedUsers.includes(userId);
   const gain = prefs.userGain[userId] ?? 1;
+  // Второй ползунок нужен, только пока человек что-то показывает:
+  // висеть без дела он не должен.
+  const показывает = useStore((s) => s.voiceScreens.has(userId));
+  const screenGain = prefs.screenGain[userId] ?? 1;
 
   useEffect(() => {
     function onDown(event: MouseEvent) {
@@ -87,6 +92,34 @@ export function UserVolumeMenu({
           громкостью не вытянуть, она поднимает всех сразу.
         </p>
       </div>
+
+      {/* Звук показа — своим ползунком. Голос и игра приходят от одного
+          человека, но слушают их по-разному: голос надо слышать всегда,
+          а игру — ровно настолько, чтобы понимать, что на экране. */}
+      {показывает && (
+        <div className="mt-2 border-t border-line px-2 pt-2 pb-1">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold tracking-wide text-muted uppercase">
+              Звук показа
+            </span>
+            <span className="text-xs text-muted">{Math.round(screenGain * 100)}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={MAX_USER_GAIN}
+            step={0.05}
+            value={screenGain}
+            disabled={muted}
+            onChange={(event) => setScreenVolume(userId, Number(event.target.value))}
+            className="w-full accent-accent disabled:opacity-40"
+            aria-label={`Громкость показа: ${name}`}
+          />
+          <p className="mt-1.5 text-xs text-muted">
+            Отдельно от голоса: игру можно убрать совсем, а человека слышать.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

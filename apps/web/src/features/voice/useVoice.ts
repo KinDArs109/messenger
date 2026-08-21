@@ -220,6 +220,13 @@ export function setUserVolume(userId: string, gain: number): void {
   currentSession()?.applyVolumes();
 }
 
+/** Громкость чужого показа — отдельно от его голоса. */
+export function setScreenVolume(userId: string, gain: number): void {
+  const { screenGain } = getPreferences();
+  setPreference("screenGain", { ...screenGain, [userId]: gain });
+  currentSession()?.applyVolumes();
+}
+
 export function toggleUserMuted(userId: string): void {
   const { mutedUsers } = getPreferences();
   const next = mutedUsers.includes(userId)
