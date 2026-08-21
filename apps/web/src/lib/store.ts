@@ -170,6 +170,10 @@ interface State {
    *  "cpu" — не хватает компьютера, "bandwidth" — канала. */
   screenTrouble: { reason: "cpu" | "bandwidth"; fps: number | null } | null;
   setScreenTrouble: (reason: "cpu" | "bandwidth" | null, fps: number | null) => void;
+  /** До какой высоты мессенджер сам опустил наш показ, чтобы удержать
+   *  кадры. null — показ идёт как выбрано. */
+  screenScaled: number | null;
+  setScreenScaled: (height: number | null) => void;
   setVoiceConnecting: (connecting: boolean) => void;
   setVoicePeers: (
     channelId: string,
@@ -389,6 +393,11 @@ export const useStore = create<State>((set, get) => ({
   screenTrouble: null,
   setScreenTrouble: (reason, fps) =>
     set({ screenTrouble: reason === null ? null : { reason, fps } }),
+
+  screenScaled: null,
+  setScreenScaled: (screenScaled) => {
+    if (get().screenScaled !== screenScaled) set({ screenScaled });
+  },
 
   setVoiceConnecting: (voiceConnecting) => set({ voiceConnecting }),
 

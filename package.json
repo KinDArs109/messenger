@@ -45,7 +45,8 @@
     "check:live": "npm run check:live -w @messenger/server",
     "check:panel": "npm run check:panel -w @messenger/admin",
     "check:share": "npm run check:share -w @messenger/desktop",
-    "check:codec": "npm run check:codec -w @messenger/desktop"
+    "check:codec": "npm run check:codec -w @messenger/desktop",
+    "check:adapt": "npm run check:adapt -w @messenger/web"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",

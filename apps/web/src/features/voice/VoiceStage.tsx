@@ -410,17 +410,38 @@ function VideoTile({ stream, own }: { stream: MediaStream; own: boolean }) {
  */
 function ScreenTrouble() {
   const trouble = useStore((s) => s.screenTrouble);
-  if (!trouble) return null;
+  const scaled = useStore((s) => s.screenScaled);
+  if (!trouble && scaled === null) return null;
 
-  const кадры = trouble.fps === null ? "" : ` Сейчас доходит ${trouble.fps} к/с.`;
+  const кадры = trouble?.fps == null ? "" : ` Сейчас доходит ${trouble.fps} к/с.`;
+
+  /*
+   * Про понижение говорим первым делом, и вот почему.
+   *
+   * Опустить картинку ради кадров — это наше решение, а не поломка:
+   * дёргающийся экран бесполезен, замыленный — нет. Но принято оно
+   * за человека, и он вправе знать, что размер уменьшили мы, а не
+   * «что-то сломалось».
+   */
+  if (scaled !== null) {
+    return (
+      <div
+        role="status"
+        className="mx-3 mb-2 shrink-0 rounded-md bg-raised px-3 py-2 text-xs leading-snug text-muted"
+      >
+        Держу плавность: опустил показ до {scaled}p, иначе кадры сыплются.{кадры} Вернётся само,
+        когда станет свободнее.
+      </div>
+    );
+  }
 
   return (
     <div
       role="status"
       className="mx-3 mb-2 shrink-0 rounded-md bg-idle/10 px-3 py-2 text-xs leading-snug text-idle"
     >
-      {trouble.reason === "cpu"
-        ? `Компьютер не успевает сжимать картинку, и собеседникам она идёт урезанной.${кадры} Поможет режим «Игра» или меньше кадров — настройки, «Голос».`
+      {trouble?.reason === "cpu"
+        ? `Компьютер не успевает сжимать картинку, и собеседникам она идёт урезанной.${кадры} Поможет меньше кадров — настройки, «Голос».`
         : `Канала не хватает, и картинка идёт урезанной.${кадры} Поможет меньшее разрешение — настройки, «Голос».`}
     </div>
   );

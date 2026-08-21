@@ -4,6 +4,7 @@ import { isApp } from "./desktop";
 import { guardScreenAudio, type EchoGuard } from "./echo";
 import { getPreferences } from "./preferences";
 import { просимH264 } from "./codecs";
+import { высотаСтупени, решить, НАЧАЛО, type Положение } from "./adapt";
 import { SpeechGate, rmsOf } from "./speaking";
 import { getSocket } from "./socket";
 
@@ -82,6 +83,9 @@ export interface VoiceEvents {
    *  Нужно, чтобы человек не гадал, почему у друга дёргается: раньше
    *  об этом можно было узнать только по жалобе собеседника. */
   onScreenTrouble: (reason: "cpu" | "bandwidth" | null, fps: number | null) => void;
+  /** Мессенджер сам опустил показ, чтобы удержать кадры: высота, до
+   *  которой опустил, или null — если показ идёт как выбрано. */
+  onScreenScaled: (height: number | null) => void;
 }
 
 /**
@@ -121,10 +125,12 @@ export interface VoiceEvents {
  * мегабит. Отсюда 720p30 — два с половиной, 720p60 — четыре с половиной,
  * 1080p15 — два с половиной.
  */
-function screenBitrate(peers = 1): number {
+function screenBitrate(peers = 1, сейчас: number | null = null): number {
   const { screenHeight, screenFps } = getPreferences();
-  // Ноль означает «как есть»; считаем по самому частому экрану.
-  const height = screenHeight > 0 ? screenHeight : 1080;
+  // Считаем по тому, что отдаём на самом деле: мессенджер мог сам
+  // опуститься ступенью ниже, чтобы удержать кадры. Ноль в настройках
+  // означает «как есть» — тогда по самому частому экрану.
+  const height = сейчас ?? (screenHeight > 0 ? screenHeight : 1080);
   const pixels = height * (height * (16 / 9));
   const base = 5_000_000 / (1080 * 1920 * 30);
 
@@ -139,7 +145,7 @@ function screenBitrate(peers = 1): number {
    * рваной картинки, и лучше в них не входить вовсе.
    */
   const своё = Math.min(8_000_000, Math.round(pixels * screenFps * base));
-  const общий = Math.round(12_000_000 / Math.max(1, peers));
+  const общий = Math.round(15_000_000 / Math.max(1, peers));
   // Полтора мегабита — нижняя граница, ниже которой смысла в показе
   // уже нет: там не «хуже видно», там не видно.
   return Math.max(1_500_000, Math.min(своё, общий));
@@ -401,6 +407,11 @@ class VoiceSession {
   private meters = new Map<string, () => void>();
   private ice: RTCIceServer[] = FALLBACK;
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
+
+  /* Насколько мы сами опустили показ ради кадров — см. lib/adapt.ts —
+   * и какую высоту отдаём захвату сейчас. */
+  private screenAdapt: Положение = НАЧАЛО;
+  private screenNow: number | null = null;
 
   /** Свои показы: экран и камера. Раздельно, потому что идут вместе:
    *  показывать что-то на экране, оставаясь при этом в кадре, —
@@ -826,11 +837,19 @@ class VoiceSession {
   private async checkScreen(): Promise<void> {
     if (!this.shares.screen.stream) {
       this.events.onScreenTrouble(null, null);
+      // Показ кончился — и наши ступени вместе с ним. Иначе полоса
+      // «опустил показ до 720p» висела бы над пустым местом.
+      if (this.screenAdapt.шаг !== 0 || this.screenNow !== null) {
+        this.screenAdapt = НАЧАЛО;
+        this.screenNow = null;
+        this.events.onScreenScaled(null);
+      }
       return;
     }
 
     let reason: "cpu" | "bandwidth" | null = null;
     let fps: number | null = null;
+    let лучший: number | null = null;
 
     for (const peer of this.peers.values()) {
       if (peer.connection.connectionState !== "connected") continue;
@@ -847,6 +866,7 @@ class VoiceSession {
         // и различаем, не заводя отдельного учёта отправителей.
         if (typeof outbound.framesPerSecond === "number") {
           fps = fps === null ? outbound.framesPerSecond : Math.min(fps, outbound.framesPerSecond);
+          лучший = лучший === null ? outbound.framesPerSecond : Math.max(лучший, outbound.framesPerSecond);
         }
         const why = outbound.qualityLimitationReason;
         if (why === "cpu" || why === "bandwidth") reason = why;
@@ -854,6 +874,75 @@ class VoiceSession {
     }
 
     this.events.onScreenTrouble(reason, fps === null ? null : Math.round(fps));
+
+    /*
+     * Опускаться решаем по лучшему из собеседников, а не по худшему.
+     *
+     * Картинку кодируем каждому свою, а захват один на всех: опустив
+     * его, мы опустим показ сразу всем. Если тяжело одному — это его
+     * канал, и браузер урежет ему картинку сам, не трогая остальных.
+     * А вот если плохо даже лучшему — дело в нас, и вот тогда пора.
+     */
+    await this.adaptScreen(лучший);
+  }
+
+  /**
+   * Держать кадры, жертвуя размером.
+   *
+   * Кодировщик, когда ему тесно, режет и размер, и кадры сразу — и
+   * получается худшее из двух: мыло, которое ещё и дёргается. Здесь
+   * мы отбираем у него этот выбор: отдаём картинку поменьше, чтобы
+   * на кадры хватило.
+   *
+   * Размер меняем у самого захвата: передоговариваться с собеседниками
+   * для этого не надо, картинка просто становится меньше на лету.
+   *
+   * Возвращаемся наверх медленно и только когда всё спокойно — иначе
+   * показ прыгал бы туда-сюда на каждой просадке.
+   */
+  private async adaptScreen(fps: number | null): Promise<void> {
+    const track = this.shares.screen.stream?.getVideoTracks()[0];
+    if (!track || track.readyState !== "live") return;
+
+    const было = this.screenAdapt;
+    this.screenAdapt = решить(было, fps, getPreferences().screenFps);
+    if (this.screenAdapt.шаг !== было.шаг) await this.applyScreenStep(track);
+  }
+
+  /** Отдать захвату новый потолок по высоте и пересчитать полосу. */
+  private async applyScreenStep(track: MediaStreamTrack): Promise<void> {
+    const { screenFps, screenHeight } = getPreferences();
+    // «Как есть» — считаем от того, что отдаёт сам экран.
+    const база = screenHeight > 0 ? screenHeight : (track.getSettings().height ?? 1080);
+    const высота = высотаСтупени(база, this.screenAdapt.шаг);
+
+    try {
+      await track.applyConstraints({
+        height: { max: высота },
+        frameRate: { ideal: screenFps, max: screenFps },
+      });
+    } catch {
+      // Захват не дал уменьшить — не считаем сделанным то, чего
+      // не вышло.
+      this.screenAdapt = { ...this.screenAdapt, шаг: Math.max(0, this.screenAdapt.шаг - 1) };
+      return;
+    }
+
+    this.screenNow = высота;
+    // Полосу пересчитываем под новый размер: считать её по выбранной
+    // в настройках высоте — значит обещать кодировщику мегабиты
+    // на картинку, которой уже нет.
+    await this.relimitScreen();
+    this.events.onScreenScaled(this.screenAdapt.шаг === 0 ? null : высота);
+  }
+
+  /** Пересчитать потолок битрейта у всех, кому идёт показ. */
+  private async relimitScreen(): Promise<void> {
+    for (const senders of this.shares.screen.senders.values()) {
+      for (const sender of senders) {
+        if (sender.track?.kind === "video") await this.limitVideo(sender, "screen");
+      }
+    }
   }
 
   private serverRtt(): Promise<number | null> {
@@ -1358,6 +1447,12 @@ class VoiceSession {
       track.contentHint = screenFps >= 30 ? "motion" : "text";
     }
 
+    // Новый показ — новые обстоятельства: прошлые ступени вниз
+    // к нему отношения не имеют.
+    this.screenAdapt = НАЧАЛО;
+    this.screenNow = null;
+    this.events.onScreenScaled(null);
+
     this.adopt("screen", display);
     await this.guardScreen(display);
     return display.id;
@@ -1491,7 +1586,7 @@ class VoiceSession {
         (encoding) => ({
           ...encoding,
           maxFramerate: screen ? screenFps : VIDEO_FPS,
-          maxBitrate: screen ? screenBitrate(this.peers.size) : VIDEO_BITRATE,
+          maxBitrate: screen ? screenBitrate(this.peers.size, this.screenNow) : VIDEO_BITRATE,
         }),
       );
       await sender.setParameters(parameters);

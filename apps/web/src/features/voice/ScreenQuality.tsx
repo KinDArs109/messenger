@@ -29,6 +29,7 @@ interface Preset {
 const PRESETS: Preset[] = [
   { label: "Игра", note: "плавнее — 1080p, 60 к/с", height: 1080, fps: 60 },
   { label: "Разговор", note: "поровну — 1080p, 30 к/с", height: 1080, fps: 30 },
+  { label: "Слабый канал", note: "бережно — 720p, 30 к/с", height: 720, fps: 30 },
   { label: "Текст", note: "чётче — 1080p, 15 к/с", height: 1080, fps: 15 },
 ];
 

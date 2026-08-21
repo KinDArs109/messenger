@@ -78,6 +78,7 @@ export function useVoice() {
           onScreen: (userId, screen) => useStore.getState().setVoiceScreen(userId, screen),
           onVideo: (userId, video) => useStore.getState().setVoiceVideo(userId, video),
           onScreenTrouble: (reason, fps) => useStore.getState().setScreenTrouble(reason, fps),
+          onScreenScaled: (height) => useStore.getState().setScreenScaled(height),
         });
 
         const ok = await socket.emitWithAck("voice:join", { channelId });

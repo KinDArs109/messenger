@@ -106,6 +106,16 @@ export interface Preferences {
   /** Кадров в секунду у демонстрации. Пятнадцати хватает тексту
    *  и таблицам, шестьдесят нужны игре. */
   screenFps: 15 | 30 | 60;
+  /** Разовый признак: старое «по умолчанию» уже заменено новым.
+   *
+   *  Нужен ровно один раз. Умолчания показа были подобраны из
+   *  осторожности — 720p и тридцать кадров, — и оказались не той
+   *  осторожностью: замер показал, что дело было в кодеке, а не
+   *  в размере. У тех, кто настройку не трогал, она так и осталась
+   *  бы старой: настройки живут в браузере и переживают обновления.
+   *  Поэтому один раз меняем её сами — но только если она в точности
+   *  прежняя, чтобы не переспорить того, кто выбрал 720p нарочно. */
+  screenTuned: boolean;
   /** Громкость сигналов «зашёл», «вышел», «включил показ», 0–1.
    *  Ноль — не звучат вовсе. Отдельно от громкости разговора: сигналы
    *  должны быть слышны поверх голосов, а не тонуть вместе с ними. */
@@ -161,7 +171,12 @@ const DEFAULTS: Preferences = {
   // не упираясь. Кому нужно плавнее, тот выберет «Игру»; кому важнее
   // сберечь канал — 720p никуда не делось.
   screenHeight: 1080,
-  screenFps: 30,
+  // Шестьдесят, а не тридцать. Показывают чаще всего игру, а игру
+  // смотрят ради того, что в ней происходит; тридцать кадров этого
+  // не передают. Мессенджер при нехватке сам опустит размер, но кадры
+  // удержит — см. СТУПЕНИ в voice.ts.
+  screenFps: 60,
+  screenTuned: true,
   soundVolume: 0.6,
   pttMode: "off",
   // F9 — не занята в большинстве игр и не мешает печатать.
@@ -292,8 +307,15 @@ function read(): Preferences {
           typeof parsed.screenGain === "object" && parsed.screenGain ? parsed.screenGain : {},
         ).map(([id, value]) => [id, clampUserGain(value)]),
       ),
-      screenHeight: oneOf(parsed.screenHeight, [720, 1080, 0], DEFAULTS.screenHeight),
-      screenFps: oneOf(parsed.screenFps, [15, 30, 60], DEFAULTS.screenFps),
+      // Разовый перенос со старых умолчаний. Точное совпадение с ними
+      // и означает «человек это не выбирал».
+      ...(parsed.screenTuned !== true && parsed.screenHeight === 720 && parsed.screenFps === 30
+        ? { screenHeight: DEFAULTS.screenHeight, screenFps: DEFAULTS.screenFps }
+        : {
+            screenHeight: oneOf(parsed.screenHeight, [720, 1080, 0], DEFAULTS.screenHeight),
+            screenFps: oneOf(parsed.screenFps, [15, 30, 60], DEFAULTS.screenFps),
+          }),
+      screenTuned: true,
       soundVolume: clampVolume(parsed.soundVolume),
       pttMode: parsed.pttMode ?? DEFAULTS.pttMode,
       pttKey: parsed.pttKey ?? DEFAULTS.pttKey,
