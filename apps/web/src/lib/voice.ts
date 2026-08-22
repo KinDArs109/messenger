@@ -2,6 +2,7 @@ import type { VoiceSignal } from "@messenger/shared";
 import { api } from "./api";
 import { isApp } from "./desktop";
 import { guardScreenAudio, type EchoGuard } from "./echo";
+import { завестиЗвукПоказа, type ЗвукПоказа } from "./screenSound";
 import { getPreferences } from "./preferences";
 import { просимH264 } from "./codecs";
 import { Раздача, type Что } from "./sfu";
@@ -340,30 +341,6 @@ interface Volume {
   source: MediaStreamAudioSourceNode;
 }
 
-/**
- * Чужой показ, звучащий у нас.
- *
- * Раньше звук показа играл сам по себе — отдельным элементом мимо
- * общего усилителя. Из-за этого он не подчинялся ни общей громкости,
- * ни «отключить звук», шёл мимо выбранных наушников и, главное,
- * не попадал в опорный сигнал гасителя эха: наш захват экрана ловил
- * чужую игру из динамиков и отправлял её обратно тому, кто её же
- * и показывает. Это и было то самое эхо на демонстрации.
- *
- * Элемент остаётся и на пути через усилитель, но замолкает: без
- * привязки потока к элементу браузер не начинает отдавать по нему
- * данные, и усилитель получает тишину.
- */
-interface Piped {
-  stream: MediaStream;
-  /** Выставить громкость — тем способом, каким этот звук идёт. */
-  apply(personal: number, total: number, deafened: boolean): void;
-  /** Перенаправить в другие наушники. Нужно только на запасном пути:
-   *  через усилитель устройство меняется у всего разом. */
-  reroute(): Promise<void>;
-  stop(): void;
-}
-
 /** Что показать человеку о его же показе. */
 export interface ПоказИдёт {
   width: number | null;
@@ -383,7 +360,7 @@ interface Peer {
   audio: HTMLAudioElement;
   volume: Volume | null;
   /** Звук его показа. */
-  screen: Piped | null;
+  screen: ЗвукПоказа | null;
   /** Каким потоком приходит его голос. Держим выбор: у показа звуковая
    *  дорожка приезжает отдельно от картинки и может обогнать объявление —
    *  и тогда поток показа неотличим от микрофонного. Приняв такой за
@@ -1420,75 +1397,32 @@ class VoiceSession {
    * этого.
    */
   private pipeScreen(userId: string, peer: Peer, stream: MediaStream | null): void {
-    if (peer.screen?.stream === stream) return;
+    /*
+     * Тот же поток — но, возможно, уже со звуком.
+     *
+     * Звуковая дорожка показа приезжает отдельно от картинки и почти
+     * всегда позже: показывающий отдаёт сперва экран, потом звук.
+     * Поток при этом остаётся тем же самым — в него просто добавилась
+     * дорожка, — и уйти отсюда молча значит оставить звук навсегда
+     * ни к чему не подключённым. Ровно на это и жаловались: картинка
+     * идёт, а звука нет.
+     */
+    if (peer.screen?.stream === stream) {
+      peer.screen.проверить();
+      return;
+    }
 
     peer.screen?.stop();
     peer.screen = null;
     if (!stream) return;
 
-    const viaMaster = this.webAudioOutput;
-    const audio = new Audio();
-    audio.autoplay = true;
-    // На пути через усилитель элемент только «заводит» поток: сам он
-    // молчит, иначе звук шёл бы дважды.
-    audio.muted = viaMaster;
-    audio.srcObject = stream;
-    if (!viaMaster) void routeToSpeaker(audio);
-
-    let volume: Volume | null = null;
-
-    /** Собрать узлы усилителя. Отдельным шагом, потому что звуковая
-     *  дорожка показа приезжает не вместе с картинкой, а когда придётся,
-     *  и часто позже. Узел-источник берёт дорожку один раз, при
-     *  создании, — значит до её появления строить его бессмысленно. */
-    const wire = () => {
-      if (volume || !viaMaster || !this.context || !this.master) return;
-      if (stream.getAudioTracks().length === 0) return;
-
-      const source = this.context.createMediaStreamSource(stream);
-      const gain = this.context.createGain();
-      gain.gain.value = this.screenGainFor(userId);
-      source.connect(gain).connect(this.master);
-      volume = { gain, source };
-    };
-
-    stream.addEventListener("addtrack", wire);
-    wire();
-
-    // Со звуком браузер вправе не запускать воспроизведение сам.
-    // Тогда ждём любого нажатия по странице: оно даёт то самое
-    // разрешение, и звук появляется без единого вопроса человеку.
-    let later: (() => void) | null = null;
-    void audio.play().catch(() => {
-      later = () => {
-        void audio.play().then(() => document.removeEventListener("click", later!));
-      };
-      document.addEventListener("click", later);
+    peer.screen = завестиЗвукПоказа(stream, {
+      context: this.context,
+      master: this.master,
+      черезУсилитель: this.webAudioOutput,
+      громкость: () => this.screenGainFor(userId),
+      вНаушники: routeToSpeaker,
     });
-
-    peer.screen = {
-      stream,
-      apply(personal, total, deafened) {
-        if (volume) {
-          volume.gain.gain.value = personal;
-          return;
-        }
-        // Запасной путь: у элемента громкость только до единицы,
-        // поэтому усиление сверх ста процентов здесь недоступно.
-        if (viaMaster) return;
-        audio.volume = Math.min(1, personal * total);
-        audio.muted = deafened;
-      },
-      reroute: () => (viaMaster ? Promise.resolve() : routeToSpeaker(audio)),
-      stop() {
-        stream.removeEventListener("addtrack", wire);
-        if (later) document.removeEventListener("click", later);
-        volume?.source.disconnect();
-        volume?.gain.disconnect();
-        volume = null;
-        audio.srcObject = null;
-      },
-    };
 
     this.applyVolumes();
   }

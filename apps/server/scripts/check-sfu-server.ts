@@ -101,6 +101,10 @@ async function main() {
   const кодеки = (возможности?.codecs ?? []).map((к) => к.mimeType.toLowerCase());
   ok("умеет H264 — им и идёт показ", кодеки.includes("video/h264"));
 
+  // Звук показа идёт той же дорогой, что и картинка, и своим кодеком.
+  // Без него собеседник увидит чужую игру немой.
+  ok("умеет opus — им идёт звук показа", кодеки.includes("audio/opus"));
+
   const дорога = await спросить<{
     id: string;
     iceCandidates?: { ip?: string; address?: string; port: number; protocol: string }[];

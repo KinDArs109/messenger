@@ -50,6 +50,8 @@
     "check:sfu": "npm run check:sfu -w @messenger/desktop",
     "check:sfu-server": "npm run check:sfu-server -w @messenger/server",
     "check:capture": "npm run check:capture -w @messenger/desktop",
+    "check:screen-sound": "npm run check:screen-sound -w @messenger/desktop",
+    "check:share-sound": "npm run check:share-sound -w @messenger/desktop",
     "check": "node scripts/check-all.mjs",
     "check:login": "npm run check:login -w @messenger/server",
     "check:signup": "npm run check:signup -w @messenger/server",

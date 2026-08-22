@@ -22,7 +22,9 @@
     "check:share": "electron scripts/check-share.cjs",
     "check:codec": "electron scripts/check-codec.cjs",
     "check:sfu": "electron scripts/check-sfu.cjs",
-    "check:capture": "electron scripts/check-capture.cjs"
+    "check:capture": "electron scripts/check-capture.cjs",
+    "check:screen-sound": "electron scripts/check-screen-sound.cjs",
+    "check:share-sound": "electron scripts/check-share-sound.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",
