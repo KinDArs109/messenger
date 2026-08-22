@@ -76,6 +76,8 @@ export function useVoice() {
           onQuality: (rtt, toServer, viaRelay) =>
             useStore.getState().setVoicePing(rtt, toServer, viaRelay),
           onScreen: (userId, screen) => useStore.getState().setVoiceScreen(userId, screen),
+          onScreenSound: (userId, есть) =>
+            useStore.getState().setVoiceScreenSound(userId, есть),
           onVideo: (userId, video) => useStore.getState().setVoiceVideo(userId, video),
           onScreenStats: (как) => useStore.getState().setScreenStats(как),
           onScreenScaled: (height) => useStore.getState().setScreenScaled(height),
@@ -215,6 +217,19 @@ export function useVoice() {
   }, []);
 
   return { join, leave, toggleMute, toggleScreen, toggleVideo, toggleDeafen, flipCamera };
+}
+
+/**
+ * Согласиться смотреть чужой показ — или перестать.
+ *
+ * Одно место на весь мессенджер, потому что согласие решает два
+ * вопроса сразу: показывать ли картинку и пускать ли звук. Раньше
+ * второго вопроса не было вовсе — звук чужой игры начинал играть,
+ * стоило зайти в канал, без единого нажатия.
+ */
+export function watchScreen(userId: string | null): void {
+  useStore.getState().setWatchingScreen(userId);
+  currentSession()?.смотреть(userId);
 }
 
 /** Громкость собеседника — только для себя. По сети не уходит ничего:

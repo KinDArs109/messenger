@@ -15,7 +15,7 @@ import { canShareScreen } from "@/lib/voice";
 import { Avatar } from "@/components/Avatar";
 import { CallTimer } from "./CallTimer";
 import { PingIndicator } from "./PingIndicator";
-import { useVoice } from "./useVoice";
+import { useVoice, watchScreen } from "./useVoice";
 import { useCalls } from "./useCalls";
 import { Screen } from "./ScreenView";
 
@@ -52,7 +52,6 @@ export function CallPanel({ channelId }: { channelId: string }) {
   const videoOn = useStore((s) => s.voiceVideoOn);
   const screens = useStore((s) => s.voiceScreens);
   const watching = useStore((s) => s.watchingScreen);
-  const stopWatching = useStore((s) => s.setWatchingScreen);
   const { leave, toggleMute, toggleScreen, toggleVideo } = useVoice();
   /** Смотрим показ собеседника — и он всё ещё идёт. */
   const watchingNow = Boolean(watching && screens.has(watching));
@@ -189,7 +188,7 @@ export function CallPanel({ channelId }: { channelId: string }) {
               а не разговор, — так же, как в голосовом канале. Выйти
               при этом можно из полоски разговора слева. */}
           <button
-            onClick={ringing ? cancel : watchingNow ? () => stopWatching(null) : leave}
+            onClick={ringing ? cancel : watchingNow ? () => watchScreen(null) : leave}
             title={
               ringing ? "Отменить звонок" : watchingNow ? "Прекратить просмотр" : "Завершить звонок"
             }

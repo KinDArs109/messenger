@@ -124,6 +124,15 @@ interface State {
    *  стол. Теперь показ ждёт согласия — как в дискорде. */
   watchingScreen: string | null;
   setWatchingScreen: (userId: string | null) => void;
+  /** В чьём показе есть звук.
+   *
+   *  Отдельно от самого показа: звуковая дорожка приезжает не вместе
+   *  с картинкой, а позже, и своему потоку браузер о ней не сообщает —
+   *  ждать от него события бесполезно (см. lib/screenSound.ts).
+   *  Говорит голосовой слой, а разметке это нужно, чтобы решить,
+   *  рисовать ли ползунок громкости показа. */
+  voiceScreenSound: Set<string>;
+  setVoiceScreenSound: (userId: string, есть: boolean) => void;
   /** То же самое для камер. Отдельно от экранов, потому что показывают
    *  их в разных местах: экран — большим полем на весь канал, камеру —
    *  в плитке самого человека, вместо аватара. */
@@ -365,6 +374,15 @@ export const useStore = create<State>((set, get) => ({
   voiceVideoOn: false,
   watchingScreen: null,
   setWatchingScreen: (watchingScreen) => set({ watchingScreen }),
+  voiceScreenSound: new Set(),
+  setVoiceScreenSound: (userId, есть) => {
+    const было = get().voiceScreenSound;
+    if (было.has(userId) === есть) return;
+    const стало = new Set(было);
+    if (есть) стало.add(userId);
+    else стало.delete(userId);
+    set({ voiceScreenSound: стало });
+  },
 
   setVoiceChannel: (voiceChannelId) =>
     set({ voiceChannelId, voiceJoinedAt: voiceChannelId ? Date.now() : null }),
@@ -388,7 +406,12 @@ export const useStore = create<State>((set, get) => ({
     const watchingScreen =
       get().watchingScreen === userId && !stream ? null : get().watchingScreen;
 
-    set({ voiceScreens, watchingScreen });
+    // Показа нет — нет и его звука: иначе ползунок громкости остался
+    // бы обещанием того, чего больше не звучит.
+    const voiceScreenSound = new Set(get().voiceScreenSound);
+    if (!stream) voiceScreenSound.delete(userId);
+
+    set({ voiceScreens, watchingScreen, voiceScreenSound });
   },
   setVoicePing: (voicePing, voicePingToServer = false, voiceViaRelay = false) =>
     set({ voicePing, voicePingToServer, voiceViaRelay }),

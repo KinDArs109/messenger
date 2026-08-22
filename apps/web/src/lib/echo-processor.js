@@ -96,6 +96,38 @@ const REPORT_EVERY = 48000;
  *  ничего не играет, а значит и гасить нечего. */
 const FLOOR = TAPS * 1e-6;
 
+/*
+ * Приглушение показа, пока звучим мы сами.
+ *
+ * Вычитание убирает наш голос из захвата примерно на двадцать
+ * децибел при громкой игре (замерено, check:echo). Двадцать — это
+ * много и одновременно мало: голос, вернувшийся к человеку тише
+ * в десять раз, но с задержкой в полсекунды, слышно прекрасно, и
+ * узнаётся он безошибочно. Оттого и жалоба: «слышу себя».
+ *
+ * Поэтому вторым слоем — приглушение. Пока в наших динамиках кто-то
+ * говорит, всё, что уходит собеседникам с показом, становится тише
+ * на четырнадцать децибел. Остаток эха уходит вместе с игрой, и
+ * ниже порога слышимости он оказывается уже вдвоём: вычитание плюс
+ * приглушение.
+ *
+ * Игра при этом на чужой стороне приседает, когда кто-то говорит.
+ * Это привычное поведение — так делает и стриминговый софт, и так
+ * делают люди руками. И это ровно то, чего от разговора хотят:
+ * слышать друг друга, а не игру.
+ */
+const DUCK_DEPTH = 0.2;
+
+/** Ниже этого в динамиках считаем, что мы молчим. −50 дБ на отсчёт:
+ *  выше — речь и звуки мессенджера, ниже — цифровая пыль. */
+const DUCK_FLOOR = 0.003;
+
+/** Приседает быстро, встаёт медленно: первый слог не должен уходить
+ *  в эхо целиком, а дёргание громкости между словами слышно хуже
+ *  самого эха. 10 мс вниз, 250 мс вверх. */
+const DUCK_ATTACK_MS = 10;
+const DUCK_RELEASE_MS = 250;
+
 class EchoCanceller extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -110,6 +142,13 @@ class EchoCanceller extends AudioWorkletProcessor {
     this.n = 0;
     /** Задержка в отсчётах; −1 — ещё не нашли, вычитать нечего. */
     this.delay = -1;
+
+    /** Насколько сейчас приглушён показ. 1 — не приглушён вовсе. */
+    this.duckGain = 1;
+    // Плавность считаем один раз: sampleRate в звуковом потоке
+    // постоянен, а возводить в степень на каждый отсчёт незачем.
+    this.duckAttack = Math.exp(-1 / ((DUCK_ATTACK_MS / 1000) * sampleRate));
+    this.duckRelease = Math.exp(-1 / ((DUCK_RELEASE_MS / 1000) * sampleRate));
     this.enabled = true;
 
     this.envRef = new Float32Array(ENV_LEN);
@@ -186,6 +225,10 @@ class EchoCanceller extends AudioWorkletProcessor {
       this.subtract(ch, heard, clean, frames);
     }
 
+    // Приглушение — поверх вычитания и до размножения по каналам:
+    // приседать они должны вместе, иначе это слышно как перекос.
+    this.duck(out, frames, channels);
+
     // Лишние каналы выхода (если их больше, чем в захвате) повторяют
     // первый: молчащая правая колонка выглядела бы поломкой.
     for (let ch = channels; ch < out.length; ch++) out[ch].set(out[0]);
@@ -195,6 +238,36 @@ class EchoCanceller extends AudioWorkletProcessor {
     this.track(capture[0], out[0], frames);
     this.seek(frames);
     return true;
+  }
+
+  /**
+   * Приглушить то, что уходит с показом, пока звучим мы сами.
+   *
+   * Смотрим на опорный сигнал с поправкой на задержку: приседать надо
+   * не тогда, когда мы отдали звук в динамики, а тогда, когда он
+   * вернулся в захват. Задержки ещё не знаем — приседаем по текущему;
+   * ошибка в этом случае невелика, а гасить в этот момент всё равно
+   * нечем, и приглушение остаётся единственным, что защищает от эха.
+   */
+  duck(out, frames, channels) {
+    const ring = this.ref[0];
+    const shift = this.delay >= 0 ? this.delay : 0;
+
+    let sum = 0;
+    for (let i = 0; i < frames; i++) {
+      const value = ring[(this.n + i - shift) & REF_MASK];
+      sum += value * value;
+    }
+    const level = Math.sqrt(sum / frames);
+    const target = level > DUCK_FLOOR ? DUCK_DEPTH : 1;
+
+    let gain = this.duckGain;
+    for (let i = 0; i < frames; i++) {
+      const smooth = target < gain ? this.duckAttack : this.duckRelease;
+      gain = target + (gain - target) * smooth;
+      for (let ch = 0; ch < channels; ch++) out[ch][i] *= gain;
+    }
+    this.duckGain = gain;
   }
 
   /** Запомнить, что мы сейчас играем. */

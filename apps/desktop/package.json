@@ -24,7 +24,8 @@
     "check:sfu": "electron scripts/check-sfu.cjs",
     "check:capture": "electron scripts/check-capture.cjs",
     "check:screen-sound": "electron scripts/check-screen-sound.cjs",
-    "check:share-sound": "electron scripts/check-share-sound.cjs"
+    "check:share-sound": "electron scripts/check-share-sound.cjs",
+    "check:echo-loopback": "electron scripts/check-echo-loopback.cjs"
   },
   "devDependencies": {
     "electron": "40.10.6",

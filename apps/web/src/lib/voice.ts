@@ -76,6 +76,10 @@ export interface VoiceEvents {
   onQuality: (rttMs: number | null, toServer: boolean, viaRelay: boolean) => void;
   /** Чужой экран появился или пропал. null — показ прекращён. */
   onScreen: (userId: string, stream: MediaStream | null) => void;
+  /** Есть ли в чужом показе звук. Отдельным событием, потому что
+   *  звуковая дорожка приезжает не вместе с картинкой, а позже,
+   *  и своему потоку браузер о ней не сообщает. */
+  onScreenSound: (userId: string, есть: boolean) => void;
   onVideo: (userId: string, stream: MediaStream | null) => void;
   /** Своя демонстрация не тянет: кодировщик режет картинку.
    *
@@ -353,6 +357,20 @@ export interface ПоказИдёт {
   черезСервер: boolean;
   /** Сколько собеседников получают картинку. */
   зрителей: number;
+  /**
+   * Гаситель собственного звука: на сколько децибел он убирает из
+   * показа то, что мы сами играем в динамики.
+   *
+   * null — гасителя нет вовсе (не собрался или в захвате нет звука),
+   * и тогда собеседник слышит в нашем показе сам себя. Знать об этом
+   * должен показывающий: у него это лечится наушниками за секунду,
+   * а собеседник может только терпеть.
+   */
+  эхо: number | null;
+  /** Уходит ли с показом звук вообще. Показывая окно, звук отдать
+   *  нельзя — система такого не умеет, — и человек об этом обычно
+   *  узнаёт от собеседников. Лучше сказать сразу. */
+  соЗвуком: boolean;
 }
 
 interface Peer {
@@ -459,6 +477,18 @@ class VoiceSession {
    *  направлять его в выбранные наушники — тогда усиление сверх 100%
    *  обменивалось бы на игнорирование выбора устройства. */
   private webAudioOutput = false;
+  /** Последний узел перед динамиками: опора гасителя эха. */
+  private вДинамики: AudioNode | null = null;
+  /**
+   * Чей показ мы согласились смотреть.
+   *
+   * Звук показа идёт только оттуда. Картинку чужого экрана мессенджер
+   * и раньше не разворачивал без спроса, а звук при этом начинал
+   * играть сам, стоило зайти в канал: человек ещё ничего не нажал,
+   * а у него уже играет чужая игра. Одно и то же согласие должно
+   * решать оба вопроса.
+   */
+  private смотрим: string | null = null;
   private deafened = false;
 
   constructor(
@@ -502,7 +532,17 @@ class VoiceSession {
       // именно теперь, когда громкость поднимается выше ста процентов:
       // сумма нескольких говорящих разом легко уходит за потолок,
       // и без ограничителя это слышно как треск в наушниках.
-      this.master.connect(makeLimiter(this.context)).connect(this.context.destination);
+      /*
+       * Последний узел перед динамиками запоминаем, и это важно
+       * для гасителя эха: опорным сигналом должно быть ровно то,
+       * что услышали динамики. Между общей громкостью и выходом
+       * стоит ограничитель, а он меняет звук неравномерно — тише
+       * на громком, никак на тихом. Вычитать сигнал до него значит
+       * вычитать не то, что вернулось в захват.
+       */
+      const вДинамики = makeLimiter(this.context);
+      this.master.connect(вДинамики).connect(this.context.destination);
+      this.вДинамики = вДинамики;
       await this.routeContextToSpeaker();
     }
 
@@ -886,6 +926,25 @@ class VoiceSession {
     await this.adaptScreen(как?.fps ?? null, как?.предел ?? null);
   }
 
+  /**
+   * Насколько гаситель убирает из показа наш собственный звук.
+   *
+   * null означает «гасителя нет»: либо в захвате не было звука вовсе,
+   * либо собрать его не удалось. Это не мелочь — без него собеседник
+   * слышит в нашем показе сам себя, и знать об этом должны мы, а не он.
+   */
+  /** Есть ли в нашем показе звук. Показывают окно — звука нет,
+     *  и гасителю в этом случае просто нечего делать. */
+  private звукОтдаём(): boolean {
+    return (this.shares.screen.stream?.getAudioTracks().length ?? 0) > 0;
+  }
+
+  private эхоГасится(): number | null {
+    const отчёт = this.shares.screen.guard?.report();
+    if (!отчёт) return null;
+    return Math.round(отчёт.gain);
+  }
+
   /** Прошлый замер отдачи — по нему считаем скорость: сама по себе
    *  она в статистике не лежит. */
   private прежняяОтдача: { байт: number; когда: number } | null = null;
@@ -919,6 +978,8 @@ class VoiceSession {
       предел: как.предел,
       черезСервер: true,
       зрителей: this.peers.size,
+      эхо: this.эхоГасится(),
+      соЗвуком: this.звукОтдаём(),
     };
   }
 
@@ -978,6 +1039,8 @@ class VoiceSession {
       мбит: this.скорость(байт, performance.now()),
       предел: reason,
       черезСервер: false,
+      эхо: this.эхоГасится(),
+      соЗвуком: this.звукОтдаём(),
       зрителей: this.peers.size,
     };
   }
@@ -1278,10 +1341,17 @@ class VoiceSession {
     const peer = this.peers.get(userId);
     if (peer) this.pipeScreen(userId, peer, screen);
 
+    // Есть ли в показе звук — вопрос отдельный от того, есть ли
+    // показ: дорожка приезжает позже картинки, а разметке надо знать,
+    // рисовать ли ползунок громкости. Своему потоку браузер о новых
+    // дорожках не сообщает, поэтому говорим сами.
+    const звук = Boolean(screen && screen.getAudioTracks().length > 0);
+
     const before = this.shown.get(userId);
     if (before?.screen !== screen) this.events.onScreen(userId, screen);
     if (before?.video !== video) this.events.onVideo(userId, video);
-    this.shown.set(userId, { screen, video });
+    if (before?.звук !== звук) this.events.onScreenSound(userId, звук);
+    this.shown.set(userId, { screen, video, звук });
   }
 
   /* ── Раздача ──────────────────────────────────────────────────
@@ -1365,7 +1435,10 @@ class VoiceSession {
 
   /** Что от кого сейчас отдано наверх — чтобы не дёргать интерфейс
    *  одним и тем же потоком по нескольку раз. */
-  private shown = new Map<string, { screen: MediaStream | null; video: MediaStream | null }>();
+  private shown = new Map<
+    string,
+    { screen: MediaStream | null; video: MediaStream | null; звук: boolean }
+  >();
 
   /** Завести собеседнику личный усилитель. */
   private attachVolume(userId: string, peer: Peer, stream: MediaStream): void {
@@ -1397,6 +1470,14 @@ class VoiceSession {
    * этого.
    */
   private pipeScreen(userId: string, peer: Peer, stream: MediaStream | null): void {
+    // Не смотрим — не звучит. Показ идёт, дорожка приезжает, а в
+    // наушники не попадает ничего, пока человек не нажмёт «Смотреть».
+    if (!stream || this.смотрим !== userId) {
+      peer.screen?.stop();
+      peer.screen = null;
+      return;
+    }
+
     /*
      * Тот же поток — но, возможно, уже со звуком.
      *
@@ -1413,9 +1494,6 @@ class VoiceSession {
     }
 
     peer.screen?.stop();
-    peer.screen = null;
-    if (!stream) return;
-
     peer.screen = завестиЗвукПоказа(stream, {
       context: this.context,
       master: this.master,
@@ -1425,6 +1503,21 @@ class VoiceSession {
     });
 
     this.applyVolumes();
+  }
+
+  /**
+   * Начали или перестали смотреть чужой показ.
+   *
+   * Зовётся из интерфейса, кнопкой «Смотреть» и её обратной стороной.
+   * Здесь только звук: картинку показывает разметка, и ей это
+   * согласие известно и без нас.
+   */
+  смотреть(userId: string | null): void {
+    if (this.смотрим === userId) return;
+    this.смотрим = userId;
+    // Пересобираем у всех: у прежнего звук надо снять, у нового —
+    // завести, и оба случая делаются одним и тем же путём.
+    for (const кто of this.peers.keys()) this.показать(кто);
   }
 
   /** Собеседник начал или прекратил что-то показывать.
@@ -1533,6 +1626,7 @@ class VoiceSession {
     const last = this.shown.get(userId);
     if (last?.screen) this.events.onScreen(userId, null);
     if (last?.video) this.events.onVideo(userId, null);
+    if (last?.звук) this.events.onScreenSound(userId, false);
     this.shown.delete(userId);
   }
 
@@ -1577,12 +1671,34 @@ class VoiceSession {
     // Звук с экрана — по возможности. Где его нет, поток придёт без
     // звуковой дорожки, и это не повод отменять показ.
     //
-    // Просим заодно не брать в захват наш собственный вывод: это из-за
-    // него собеседник слышит сам себя. Замерено, что в оболочке просьба
-    // принимается и не выполняется, поэтому ниже мы всё равно гасим
-    // свой звук сами — но там, где она работает, гасителю просто нечего
-    // будет делать.
-    const audio: ScreenAudioConstraints = { restrictOwnAudio: true };
+    /*
+     * Просим заодно не брать в захват наш собственный вывод: это из-за
+     * него собеседник слышит сам себя. Замерено, что в оболочке просьба
+     * принимается и не выполняется, поэтому ниже мы всё равно гасим
+     * свой звук сами — но там, где она работает, гасителю просто нечего
+     * будет делать.
+     *
+     * И отдельно — просьба ничего с этим звуком не делать. По умолчанию
+     * браузер обходится с захватом системы как с микрофоном: включает
+     * подавление эха, шумодав и автоусиление, сводит в один канал.
+     * Замерено на этой машине: echoCancellation, noiseSuppression,
+     * autoGainControl — все три включены, channelCount 1. Для голоса
+     * это правильно, для игры — порча: шумодав ест ровный гул и хвосты,
+     * автоусиление качает громкость вслед за выстрелами, а стерео
+     * схлопывается в моно.
+     *
+     * Гасителю эха от этого, вопреки ожиданию, почти всё равно:
+     * замерено (check:echo), что медленное автоусиление отнимает у него
+     * пару децибел — фильтр за ним успевает. Так что выключаем ради
+     * самого звука, а не ради гасителя.
+     */
+    const audio: ScreenAudioConstraints = {
+      restrictOwnAudio: true,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: { ideal: 2 },
+    };
 
     // Качество берём из настроек: игре нужна плавность, тексту —
     // чёткость, а через ретранслятор за каждый лишний мегабит платим
@@ -1597,8 +1713,22 @@ class VoiceSession {
     let display: MediaStream;
     try {
       display = await navigator.mediaDevices.getDisplayMedia({ video, audio });
-    } catch {
-      return null;
+    } catch (беда) {
+      /*
+       * Отказ отказу рознь.
+       *
+       * Человек закрыл окно выбора — это решение, и спрашивать снова
+       * значит открыть окно во второй раз подряд. А вот «не умею
+       * столько условий сразу» — повод повторить попроще: остаться
+       * без показа из-за просьбы про стерео было бы обидно.
+       */
+      const имя = (беда as { name?: string } | null)?.name ?? "";
+      if (имя === "NotAllowedError" || имя === "AbortError") return null;
+      try {
+        display = await navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+      } catch {
+        return null;
+      }
     }
 
     /*
@@ -1636,7 +1766,7 @@ class VoiceSession {
     // вывод идёт мимо усилителя — гасить не из чего и нечем.
     if (!raw || !this.context || !this.master) return;
 
-    const guard = await guardScreenAudio(this.context, this.master, raw);
+    const guard = await guardScreenAudio(this.context, this.вДинамики ?? this.master, raw);
     if (!guard) return;
 
     display.removeTrack(raw);

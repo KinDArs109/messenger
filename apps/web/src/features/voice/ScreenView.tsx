@@ -4,6 +4,7 @@ import { Maximize2, Minimize2, Play } from "lucide-react";
 import { desktop } from "@/lib/desktop";
 import { usePeople, useStore } from "@/lib/store";
 import { canShareScreen } from "@/lib/voice";
+import { watchScreen } from "./useVoice";
 import { ScreenVolume } from "./ScreenVolume";
 
 /**
@@ -22,26 +23,19 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
 
   /* Есть ли в показе звук. Ползунку громкости иначе нечем управлять,
      а показывать его при немом показе — обещать то, чего нет.
-     Следим, а не смотрим один раз: звуковая дорожка приезжает
-     отдельно от картинки и часто позже. */
-  const [соЗвуком, setСоЗвуком] = useState(stream.getAudioTracks().length > 0);
-  useEffect(() => {
-    const пересчитать = () => setСоЗвуком(stream.getAudioTracks().length > 0);
-    пересчитать();
-    stream.addEventListener("addtrack", пересчитать);
-    stream.addEventListener("removetrack", пересчитать);
-    return () => {
-      stream.removeEventListener("addtrack", пересчитать);
-      stream.removeEventListener("removetrack", пересчитать);
-    };
-  }, [stream]);
+
+     Спрашиваем голосовой слой, а не сам поток. У потока для этого есть
+     событие addtrack, но приходит оно не всегда: поток чужого показа
+     мессенджер через раздачу собирает сам, а своему потоку браузер
+     о добавленных дорожках не сообщает (см. lib/screenSound.ts).
+     Ползунок из-за этого не появлялся вовсе — при живом звуке. */
+  const соЗвуком = useStore((s) => s.voiceScreenSound.has(userId));
 
   /** Смотрим ли мы этот показ.
    *
    *  Своё — всегда: это не просмотр, а зеркало, по нему проверяют,
    *  что именно ушло друзьям. Чужое — только по согласию. */
   const watching = useStore((s) => s.watchingScreen) === userId || own;
-  const setWatching = useStore((s) => s.setWatchingScreen);
 
   /** Поток есть, воспроизведение идёт, а новых кадров нет. */
   const [stuck, setStuck] = useState(false);
@@ -304,14 +298,14 @@ export function Screen({ userId, stream }: { userId: string; stream: MediaStream
             показывает экран
           </p>
           <button
-            onClick={() => setWatching(userId)}
+            onClick={() => watchScreen(userId)}
             className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
           >
             <Play className="size-4" />
             Смотреть
           </button>
           <p className="max-w-[280px] text-xs text-faint">
-            Пока не нажмёте, картинка не грузится — ни трафика, ни лишнего окна.
+            Пока не нажмёте, чужой экран не открывается и его звук не играет.
           </p>
         </div>
       )}

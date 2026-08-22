@@ -24,7 +24,7 @@ import { CallTimer } from "./CallTimer";
 import { PingIndicator } from "./PingIndicator";
 import { MicPopover, OutputPopover } from "./SoundPopover";
 import { UserVolumeMenu } from "./UserVolumeMenu";
-import { useVoice } from "./useVoice";
+import { useVoice, watchScreen } from "./useVoice";
 import { canShareScreen, hasTwoCameras } from "@/lib/voice";
 
 /**
@@ -48,7 +48,6 @@ export function VoiceStage({ channelId }: { channelId: string }) {
   const deafened = useStore((s) => s.voiceDeafened);
   const ping = useStore((s) => s.voicePing);
   const watching = useStore((s) => s.watchingScreen);
-  const stopWatching = useStore((s) => s.setWatchingScreen);
   const { prefs } = usePreferences();
   const [menu, setMenu] = useState<{
     userId: string;
@@ -239,7 +238,7 @@ export function VoiceStage({ channelId }: { channelId: string }) {
                   как «показываю», а тут ровно обратное. */}
               {watchingNow ? (
                 <button
-                  onClick={() => stopWatching(null)}
+                  onClick={() => watchScreen(null)}
                   title="Прекратить просмотр"
                   aria-label="Прекратить просмотр"
                   className="rounded-full bg-danger p-3 text-white transition-opacity duration-150 hover:opacity-85"
@@ -428,6 +427,20 @@ function ScreenTrouble() {
     части.push(`${как.мбит.toFixed(1).replace(".", ",")} Мбит/с`);
   }
   части.push(как.черезСервер ? "через сервер" : "напрямую каждому");
+
+  /*
+   * Свой звук в показе.
+   *
+   * Захват берёт весь вывод системы, а там играют голоса собеседников —
+   * и каждый из них слышит в нашем показе сам себя. Гаситель это
+   * убирает; когда его нет, знать об этом должен показывающий:
+   * у него это лечится наушниками за секунду, а собеседник может
+   * только терпеть и гадать.
+   */
+  if (!как.соЗвуком) части.push("без звука");
+  else if (как.эхо === null) части.push("свой звук не гасится");
+  else if (как.эхо > 3) части.push(`свой звук гасится, −${как.эхо} дБ`);
+  else части.push("свой звук гасится");
 
   const беда =
     как.предел === "cpu"
